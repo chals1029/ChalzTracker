@@ -1,0 +1,865 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark light">
+  <title>ChalzTracker — Your Personal AI Usage Tracker</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/chalz-icon-32.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/assets/chalz-icon-192.png">
+  <link rel="apple-touch-icon" href="/assets/chalz-icon-192.png">
+  <link rel="icon" type="image/svg+xml" href="/assets/chalz-logo.svg">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body data-view-mode="dashboard">
+  <!-- ======================================================================
+       COMPACT DESKTOP WIDGET & TRAY POPOVER
+       ====================================================================== -->
+  <aside id="widget-host" class="widget-host" aria-label="Compact Usage Widget" hidden>
+    <div id="widget-shell" class="widget-shell">
+      <div class="widget-chrome">
+        <div class="widget-chrome-left">
+          <span class="status-dot" id="widget-pulse" aria-hidden="true"></span>
+          <span class="widget-chrome-title brand-inline">
+            <span class="chalz-text-logo sm">Chalz<span class="chalz-slash">/</span></span><span class="chalz-tracker-tag">Tracker</span>
+          </span>
+          <span class="widget-chrome-sep" aria-hidden="true">·</span>
+          <span id="widget-sync-text" class="widget-chrome-sub">Updated just now</span>
+        </div>
+        <div class="widget-chrome-actions">
+          <button id="widget-group-toggle" class="chrome-pill-btn" type="button" aria-pressed="true" title="Toggle between grouped providers and all individual accounts">
+            By provider
+          </button>
+          <button id="widget-quota-toggle" class="chrome-pill-btn" type="button" title="Toggle between Used % and Remaining %">
+            Used %
+          </button>
+          <button id="widget-add-btn" class="chrome-icon-btn" type="button" title="Sign in &amp; add another account (+)" aria-label="Add account">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+              <path d="M8 3.2v9.6M3.2 8h9.6" stroke-linecap="round"/>
+            </svg>
+          </button>
+          <button id="widget-refresh-btn" class="chrome-icon-btn" type="button" title="Refresh all quotas (R)" aria-label="Refresh quotas">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+              <path d="M13.2 8a5.2 5.2 0 1 1-1.3-3.45" stroke-linecap="round"/>
+              <path d="M13.2 2.6v2.2H11" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <button id="widget-detail-toggle" class="chrome-icon-btn" type="button" aria-pressed="true" title="Toggle side detail card" aria-label="Toggle detail panel">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+              <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+              <path d="M8.5 2.5v11"/>
+            </svg>
+          </button>
+          <button id="widget-float-btn" class="chrome-icon-btn" type="button" aria-pressed="false" title="Pin window Always-on-Top" aria-label="Pin window Always-on-Top">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+              <path d="M5.5 2.5h5l-.6 4 1.8 1.8v1.2H4.3V8.3l1.8-1.8-.6-4z" stroke-linejoin="round"/>
+              <path d="M8 9.5v4" stroke-linecap="round"/>
+            </svg>
+          </button>
+          <button id="widget-customize-btn" class="chrome-icon-btn" type="button" title="Customize UI, layout &amp; sounds (C)" aria-label="Customize UI">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+              <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" stroke-linecap="round"/>
+              <circle cx="5.5" cy="4.5" r="1.4" fill="var(--bg-surface)"/>
+              <circle cx="10.5" cy="8" r="1.4" fill="var(--bg-surface)"/>
+              <circle cx="6.8" cy="11.5" r="1.4" fill="var(--bg-surface)"/>
+            </svg>
+          </button>
+          <button id="widget-help-btn" class="chrome-icon-btn chrome-help-btn" type="button" title="About ChalzTracker (?)" aria-label="About ChalzTracker">
+            <span aria-hidden="true">?</span>
+          </button>
+          <button id="widget-minimize-pill" class="chrome-icon-btn" type="button" title="Minimize to small clickable usage button" aria-label="Minimize to small button">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+              <path d="M3.5 8h9" stroke-linecap="round"/>
+            </svg>
+          </button>
+          <button id="widget-expand-dashboard" class="chrome-icon-btn" type="button" title="Expand to full dashboard" aria-label="Expand to full dashboard">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+              <path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5L9 7M2.5 13.5L7 9" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div id="widget-columns" class="widget-columns">
+        <div id="widget-account-list" class="widget-master" role="listbox" aria-label="Connected providers"></div>
+        <div id="widget-detail-card" class="widget-detail" aria-live="polite"></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ======================================================================
+       MINI CLICKABLE DESKTOP BUTTON / TRAY PILL
+       ====================================================================== -->
+  <div id="mini-pill-dock" class="mini-pill-dock" hidden>
+    <span class="mini-pill-drag" title="Drag to move" aria-hidden="true"><svg viewBox="0 0 8 16" width="8" height="16" fill="currentColor"><circle cx="2" cy="4" r="1"/><circle cx="6" cy="4" r="1"/><circle cx="2" cy="8" r="1"/><circle cx="6" cy="8" r="1"/><circle cx="2" cy="12" r="1"/><circle cx="6" cy="12" r="1"/></svg></span>
+    <button id="mini-pill-trigger" class="mini-pill-trigger" type="button" aria-expanded="false" title="Click to view all provider usage">
+      <span id="mini-pill-icons" class="mini-pill-icons" aria-hidden="true"></span>
+      <span class="mini-pill-copy">
+        <span class="mini-pill-title"><span class="chalz-text-logo xs">Chalz<span class="chalz-slash">/</span></span>Tracker</span>
+        <span id="mini-pill-summary" class="mini-pill-summary">Loading…</span>
+      </span>
+      <span class="mini-pill-meter-wrap">
+        <progress id="mini-pill-meter" class="pill-meter" max="1" value="0" data-severity="low"></progress>
+        <span id="mini-pill-pct" class="mini-pill-pct">—</span>
+      </span>
+      <svg class="mini-pill-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+        <path d="M4.5 10L8 6.5 11.5 10" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+    <button id="mini-pill-restore" class="mini-pill-restore" type="button" title="Restore full dashboard" aria-label="Restore full dashboard">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+        <path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5L9 7M2.5 13.5L7 9" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+  </div>
+
+  <div class="desktop-titlebar">
+    <div class="desktop-titlebar-brand">
+      <img src="/assets/chalz-icon-32.png" alt="" width="24" height="24">
+      <span>ChalzTracker</span>
+    </div>
+    <div id="desktop-controls" class="desktop-titlebar-controls" aria-label="Window controls">
+      <button id="desktop-min-btn" class="desktop-control-btn" type="button" title="Minimize window" aria-label="Minimize">
+        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 8.5h10"/></svg>
+      </button>
+      <button id="desktop-max-btn" class="desktop-control-btn" type="button" title="Maximize or restore" aria-label="Maximize">
+        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="3" y="3" width="10" height="10" rx="1.5"/></svg>
+      </button>
+      <button id="desktop-close-btn" class="desktop-control-btn close" type="button" title="Close window" aria-label="Close">
+        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ======================================================================
+       FULL DASHBOARD SHELL
+       ====================================================================== -->
+  <main id="dashboard-shell" class="shell">
+    <!-- Top Utility Bar -->
+    <div class="topbar">
+      <div class="topbar-controls">
+        <div class="mode-Quickbar" role="group" aria-label="Widget and desktop modes">
+          <button id="open-widget-mode" class="pill-button" type="button" title="Switch to compact usage widget (Shortcut: W)">
+            <svg class="icon-xs" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+              <rect x="2" y="2.5" width="12" height="11" rx="2"/>
+              <path d="M8 2.5v11"/>
+            </svg>
+            <span>Widget</span>
+          </button>
+          <button id="open-pill-mode" class="pill-button" type="button" title="Minimize to small clickable usage button (Shortcut: M)">
+            <svg class="icon-xs" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+              <rect x="2" y="5" width="12" height="6" rx="3"/>
+              <circle cx="5.5" cy="8" r="1.2" fill="currentColor"/>
+            </svg>
+            <span>Mini button</span>
+          </button>
+          <button id="float-widget" class="pill-button" type="button" aria-pressed="false" title="Switch this window into an Always-on-Top compact widget">
+            <svg class="icon-xs" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+              <path d="M5.5 2.5h5l-.6 4 1.8 1.8v1.2H4.3V8.3l1.8-1.8-.6-4z" stroke-linejoin="round"/>
+              <path d="M8 9.5v4" stroke-linecap="round"/>
+            </svg>
+            <span>Pin widget</span>
+          </button>
+        </div>
+
+        <button id="toggle-alerts" class="pill-button" type="button" aria-pressed="true" title="Configure Usage Reset &amp; Quota Threshold Notifications (Shortcut: N)">
+          <svg class="icon-xs" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <path d="M8 2.2a3.8 3.8 0 0 0-3.8 3.8v2.3L2.8 10v1h10.4v-1l-1.4-1.7V6A3.8 3.8 0 0 0 8 2.2z" stroke-linejoin="round"/>
+            <path d="M6.5 12.5a1.6 1.6 0 0 0 3 0" stroke-linecap="round"/>
+          </svg>
+          <span id="alerts-label">Alerts On</span>
+        </button>
+
+        <button id="toggle-poll" class="pill-button" type="button" aria-pressed="false" title="Pause or resume 60s auto-refresh">
+          <svg class="icon-xs" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <circle cx="8" cy="8" r="6"/>
+            <path d="M8 4.8V8l2.2 1.4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span id="poll-countdown">60s</span>
+        </button>
+
+        <button id="toggle-theme" class="pill-button" type="button" title="Switch between Dark and Light appearance (Shortcut: T)" aria-label="Toggle color theme">
+          <svg class="icon-xs" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <circle cx="8" cy="8" r="4"/>
+            <path d="M8 1.8v1.5M8 12.7v1.5M1.8 8h1.5M12.7 8h1.5M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1" stroke-linecap="round"/>
+          </svg>
+          <span id="theme-label">Dark</span>
+        </button>
+
+        <button id="open-command" class="pill-button command-trigger" type="button" title="Open command palette (Ctrl+K)" aria-label="Open command palette (Ctrl+K)">
+          <svg class="icon-xs" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <circle cx="7" cy="7" r="4.3"/>
+            <path d="M10.3 10.3L13.8 13.8" stroke-linecap="round"/>
+          </svg>
+          <kbd class="kbd-hint">Ctrl K</kbd>
+        </button>
+
+      </div>
+
+    </div>
+
+    <!-- Hero Header -->
+    <header class="header">
+      <div class="header-copy">
+        <p class="kicker">Your Personal AI Usage Tracker</p>
+        <div class="chalz-brand-lockup">
+          <div class="chalz-mark-box" aria-hidden="true">
+            <svg class="chalz-mark-svg" viewBox="0 0 36 36" fill="none">
+              <rect class="chalz-mark-bg" x="1" y="1" width="34" height="34" rx="9" stroke-width="1.5"/>
+              <path class="chalz-mark-c" d="M23.5 11.5H14.8C12.7 11.5 11 13.2 11 15.3V20.7C11 22.8 12.7 24.5 14.8 24.5H23.5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+              <path class="chalz-mark-bar" d="M16.5 18H25.5" stroke-width="2.8" stroke-linecap="round"/>
+              <circle class="chalz-mark-dot" cx="25.5" cy="11.5" r="1.85"/>
+            </svg>
+          </div>
+          <div class="chalz-brand-text">
+            <h1 class="chalz-hero-title">
+              <span class="chalz-text-logo hero">
+                <svg class="chalz-wordmark-svg" viewBox="0 0 112 28" fill="none" aria-hidden="true">
+                  <g stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M18.5 5.5H9.2C5.8 5.5 3 8.3 3 11.7V16.3C3 19.7 5.8 22.5 9.2 22.5H18.5"/>
+                    <path d="M26.5 5.5V22.5M40.5 5.5V22.5M26.5 14H40.5"/>
+                    <path d="M48.5 22.5L56.5 5.5L64.5 22.5M51.1 17.2H61.9"/>
+                    <path d="M72.5 5.5V22.5H85.5"/>
+                    <path d="M92.5 5.5H108.5L92.5 22.5H108.5"/>
+                  </g>
+                  <path class="chalz-wordmark-accent" d="M96.8 14H104.2" stroke-width="2.7" stroke-linecap="round"/>
+                </svg>
+                <span class="sr-only">Chalz</span>
+                <span class="chalz-dot-accent" aria-hidden="true"></span>
+              </span>
+              <span class="chalz-tracker-word">Tracker</span>
+            </h1>
+          </div>
+        </div>
+        <p class="subtitle">Connect unlimited accounts across Antigravity, Codex, Claude, Cursor, Copilot &amp; more — 100% standalone.</p>
+      </div>
+      <div class="header-actions">
+        <button class="button secondary" id="open-customize-btn" type="button" title="Customize colors, card layout, sections &amp; notification sounds (Shortcut: C)">
+          <svg class="btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <path d="M2.2 4.5h11.6M2.2 8h11.6M2.2 11.5h11.6" stroke-linecap="round"/>
+            <circle cx="5.4" cy="4.5" r="1.5" fill="var(--bg-surface)"/>
+            <circle cx="10.6" cy="8" r="1.5" fill="var(--bg-surface)"/>
+            <circle cx="6.6" cy="11.5" r="1.5" fill="var(--bg-surface)"/>
+          </svg>
+          <span>Customize</span>
+        </button>
+        <button class="button secondary" id="refresh-all" type="button" title="Refresh all connected accounts (Shortcut: R)">
+          <svg class="btn-icon refresh-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <path d="M13.5 8a5.5 5.5 0 1 1-1.35-3.6" stroke-linecap="round"/>
+            <path d="M13.5 2.5v2.3h-2.3" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>Refresh all</span>
+        </button>
+        <button class="button primary" id="add-account" type="button" title="Sign in manually to connect another account (Shortcut: A)">
+          <svg class="btn-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <path d="M8 3v10M3 8h10" stroke-linecap="round"/>
+          </svg>
+          <span>Add account</span>
+        </button>
+        <button class="button secondary help-trigger-btn" id="omp-help-btn" type="button" title="About ChalzTracker (Shortcut: ?)" aria-label="About ChalzTracker">
+          <span aria-hidden="true">?</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Bento KPI Strip -->
+    <section class="bento-kpis" aria-label="Usage summary">
+      <button type="button" class="kpi-card" id="kpi-accounts" data-target-tab="vault">
+        <div class="kpi-top">
+          <span class="kpi-label">Connected Accounts</span>
+          <span class="kpi-pill" id="kpi-accounts-pill">Loading</span>
+        </div>
+        <div class="kpi-value-row">
+          <span class="kpi-value" id="kpi-accounts-val">—</span>
+        </div>
+        <div class="kpi-mini-bar"><progress id="kpi-accounts-meter" class="meter" max="1" value="0" data-severity="low"></progress></div>
+        <p class="kpi-sub" id="kpi-accounts-sub">Loading your local account vault…</p>
+      </button>
+
+      <button type="button" class="kpi-card" id="kpi-headroom" data-target-tab="usage">
+        <div class="kpi-top">
+          <span class="kpi-label">Fleet Headroom</span>
+          <span class="kpi-pill" id="kpi-headroom-pill">Avg Free</span>
+        </div>
+        <div class="kpi-value-row">
+          <span class="kpi-value" id="kpi-headroom-val">—</span>
+        </div>
+        <div class="kpi-mini-bar"><progress id="kpi-headroom-meter" class="meter" max="1" value="0" data-severity="medium"></progress></div>
+        <p class="kpi-sub" id="kpi-headroom-sub">Waiting for quota windows…</p>
+      </button>
+
+      <button type="button" class="kpi-card" id="kpi-router" data-target-tab="analytics">
+        <div class="kpi-top">
+          <span class="kpi-label">Smart Router</span>
+          <span class="kpi-pill" id="kpi-router-pill">Best Now</span>
+        </div>
+        <div class="kpi-value-row">
+          <span class="kpi-value" id="kpi-router-val">—</span>
+        </div>
+        <div class="kpi-mini-bar"><progress id="kpi-router-meter" class="meter" max="1" value="0" data-severity="low"></progress></div>
+        <p class="kpi-sub" id="kpi-router-sub">Ranks best account per provider…</p>
+      </button>
+
+      <button type="button" class="kpi-card" id="kpi-resets" data-target-tab="timeline">
+        <div class="kpi-top">
+          <span class="kpi-label">Reset Horizon</span>
+          <span class="kpi-pill" id="kpi-resets-pill">24h</span>
+        </div>
+        <div class="kpi-value-row">
+          <span class="kpi-value" id="kpi-resets-val">—</span>
+        </div>
+        <div class="kpi-mini-bar"><progress id="kpi-resets-meter" class="meter" max="1" value="0" data-severity="low"></progress></div>
+        <p class="kpi-sub" id="kpi-resets-sub">Upcoming quota window resets…</p>
+      </button>
+    </section>
+
+    <!-- Navigation Tabs -->
+    <div class="tabs-bar">
+      <div class="tabs" role="tablist" aria-label="Dashboard views">
+        <button id="usage-tab" class="tab" type="button" role="tab" aria-selected="true" aria-controls="usage-panel" tabindex="0">
+          <span>Usage</span>
+          <span id="usage-tab-badge" class="tab-badge" hidden>0</span>
+        </button>
+        <button id="analytics-tab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="analytics-panel" tabindex="-1">
+          <span>Analytics &amp; Pace</span>
+          <span id="analytics-tab-badge" class="tab-badge" hidden>0</span>
+        </button>
+        <button id="timeline-tab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="timeline-panel" tabindex="-1">
+          <span>Reset Timeline</span>
+          <span id="timeline-tab-badge" class="tab-badge" hidden>0</span>
+        </button>
+        <button id="vault-tab" class="tab" type="button" role="tab" aria-selected="false" aria-controls="vault-panel" tabindex="-1">
+          <span>Account Vault</span>
+          <span id="vault-tab-badge" class="tab-badge" hidden>0</span>
+        </button>
+      </div>
+      <div class="local-note" title="Credentials stay in ~/.chalztracker with 0600 local permissions">
+        <span aria-hidden="true"></span> Standalone Local Vault
+      </div>
+    </div>
+
+    <!-- TAB 1: USAGE & SMART ROUTER -->
+    <div id="usage-panel" role="tabpanel" aria-labelledby="usage-tab">
+      <section id="smart-router-section" class="smart-router-section" aria-label="Smart Account Router" hidden>
+        <div class="smart-router-header">
+          <div class="smart-router-title-wrap">
+            <span class="router-spark" aria-hidden="true">★</span>
+            <strong>Best Account To Use Right Now</strong>
+            <span class="smart-router-hint">Auto-scored by bottleneck headroom &amp; expiring-window urgency</span>
+          </div>
+        </div>
+        <div id="smart-router-bar" class="smart-router-grid"></div>
+      </section>
+
+      <section aria-labelledby="accounts-heading">
+        <div class="section-heading account-heading">
+          <div>
+            <h2 id="accounts-heading">Accounts</h2>
+            <p id="account-count">Loading accounts…</p>
+          </div>
+          <div class="usage-controls account-filters">
+            <div class="account-filters-primary">
+            <div class="search-box compact-search">
+              <svg class="search-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                <circle cx="7" cy="7" r="4.5"/>
+                <path d="M10.5 10.5L14 14" stroke-linecap="round"/>
+              </svg>
+              <input id="account-search" type="search" placeholder="Filter account, tag, or window…" aria-label="Filter accounts or quota windows">
+            </div>
+            <div class="filter-pills" id="provider-filters" role="group" aria-label="Filter by provider">
+              <button type="button" class="chip active" data-provider-filter="all">All</button>
+            </div>
+            </div>
+            <div class="account-filters-secondary">
+            <select id="tag-filter" class="control-select" aria-label="Filter by tag">
+              <option value="all">All tags</option>
+              <option value="Personal">Personal</option>
+              <option value="Work">Work</option>
+              <option value="Main">Main</option>
+              <option value="Backup">Backup</option>
+              <option value="Team">Team</option>
+            </select>
+            <select id="account-sort" class="control-select" aria-label="Sort accounts">
+              <option value="router">Sort: Smart Router</option>
+              <option value="headroom-desc">Most headroom</option>
+              <option value="usage-desc">Highest usage</option>
+              <option value="reset-asc">Soonest reset</option>
+              <option value="provider">Provider name</option>
+            </select>
+            <button id="quota-mode-toggle" class="chip-toggle" type="button" aria-pressed="false" title="Switch between Used % and Remaining %">
+              Show: Used %
+            </button>
+            <button class="chip-toggle" data-identity-mask type="button" aria-pressed="true" title="Show or hide account emails">
+              Reveal emails
+            </button>
+            <button id="layout-toggle" class="chip-toggle" type="button" aria-pressed="false" title="Toggle between Master-Detail Popover layout and Card Grid">
+              Popover layout
+            </button>
+            </div>
+          </div>
+        </div>
+        <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+
+        <!-- Inline Master-Detail Popover Preview -->
+        <div id="inline-widget-preview" class="inline-widget-preview" hidden></div>
+
+        <div id="accounts" class="account-grid" aria-live="polite"></div>
+      </section>
+    </div>
+
+    <!-- TAB 2: ANALYTICS & BURN PACE -->
+    <section id="analytics-panel" class="activity-section" role="tabpanel" aria-labelledby="analytics-tab" hidden>
+      <div class="section-heading">
+        <div>
+          <h2>Analytics &amp; Burn Pace</h2>
+          <p>Fleet capacity share, window burn-rate forecasting, and historical usage trajectory.</p>
+        </div>
+        <div class="usage-controls">
+          <button id="export-fleet-csv" class="chip-toggle" type="button" title="Export all current account quota windows to CSV">
+            Export Quotas CSV
+          </button>
+        </div>
+      </div>
+      <div id="analytics-content" class="data-panel" aria-live="polite">Loading analytics…</div>
+    </section>
+
+    <!-- TAB 3: RESET TIMELINE & EVENT LOG -->
+    <section id="timeline-panel" class="activity-section" role="tabpanel" aria-labelledby="timeline-tab" hidden>
+      <div class="section-heading">
+        <div>
+          <h2>Reset Timeline &amp; Activity Log</h2>
+          <p>Chronological window resets ("use before reset" opportunities) and threshold alert history.</p>
+        </div>
+        <div class="usage-controls">
+          <button id="timeline-alert-settings-btn" class="chip-toggle" type="button" title="Configure Usage Reset Notifications">
+            Reset Alerts
+          </button>
+          <button id="export-events-csv" class="chip-toggle" type="button" title="Export event history to CSV">
+            Export CSV
+          </button>
+          <button id="export-events-json" class="chip-toggle" type="button" title="Export event history to JSON">
+            Export JSON
+          </button>
+        </div>
+      </div>
+      <div id="timeline-schedule" class="data-panel" aria-live="polite"></div>
+      <div id="timeline-events" class="data-panel timeline-events-panel" aria-live="polite"></div>
+    </section>
+
+    <!-- TAB 4: UNLIMITED ACCOUNT VAULT -->
+    <section id="vault-panel" class="activity-section" role="tabpanel" aria-labelledby="vault-tab" hidden>
+      <div class="section-heading">
+        <div>
+          <h2>Account Vault</h2>
+          <p>Rename nicknames, assign group tags, pin favorites, pause polling, or re-authenticate any account.</p>
+        </div>
+        <div class="usage-controls">
+          <button id="toggle-identity-mask" class="chip-toggle" data-identity-mask type="button" aria-pressed="true">
+            Reveal emails
+          </button>
+          <button id="vault-add-btn" class="button primary btn-sm" type="button">
+            + Add another account
+          </button>
+        </div>
+      </div>
+      <div id="multi-auth-accounts" class="account-grid" aria-live="polite"></div>
+    </section>
+
+    <footer class="footer">
+      <span>ChalzTracker — Standalone Personal AI Usage Tracker · Local vault at <code>~/.chalztracker</code></span>
+      <span class="footer-shortcuts"><kbd>A</kbd> Add · <kbd>C</kbd> Customize · <kbd>N</kbd> Alerts · <kbd>1</kbd>–<kbd>4</kbd> Tabs · <kbd>W</kbd> Widget · <kbd>R</kbd> Refresh · <kbd>Ctrl K</kbd> Commands</span>
+    </footer>
+  </main>
+
+  <!-- Toast Notification Stack -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <!-- ======================================================================
+       MANUAL MULTI-ACCOUNT SIGN-IN DIALOG (10 PROVIDERS, OFFICIAL LOGOS)
+       ====================================================================== -->
+  <dialog id="add-dialog" class="auth-dialog" aria-labelledby="dialog-title" aria-describedby="dialog-description">
+    <div class="dialog-header">
+      <div>
+        <span class="dialog-kicker" id="dialog-kicker">Manual Multi-Account Sign-In</span>
+        <h2 id="dialog-title">Connect an AI Account</h2>
+        <p id="dialog-description">Sign in directly with any provider. Connect as many accounts per provider as you want.</p>
+      </div>
+      <button id="close-dialog" class="icon-button" type="button" aria-label="Close">×</button>
+    </div>
+
+    <!-- STEP 1: 10-Provider Picker Grid -->
+    <div id="auth-step-pick" class="auth-step">
+      <div id="provider-picker-grid" class="provider-picker-grid" role="list"></div>
+    </div>
+
+    <!-- STEP 2: Configure Nickname, Tag & Sign-In Method -->
+    <div id="auth-step-config" class="auth-step" hidden>
+      <div class="auth-selected-bar">
+        <button id="auth-back-btn" class="text-button" type="button">← All providers</button>
+        <div id="auth-selected-badge" class="auth-selected-badge"></div>
+      </div>
+
+      <div class="auth-form-grid">
+        <div class="auth-field">
+          <label class="search-label" for="auth-label-input">Account Nickname (optional)</label>
+          <input id="auth-label-input" class="auth-text-input" type="text" maxlength="64" placeholder="e.g. Work Pro, Personal #2, Team Max">
+        </div>
+        <div class="auth-field">
+          <label class="search-label" for="auth-tag-select">Group Tag</label>
+          <select id="auth-tag-select" class="control-select auth-full-select">
+            <option value="">No tag</option>
+            <option value="Personal">Personal</option>
+            <option value="Work">Work</option>
+            <option value="Main">Main</option>
+            <option value="Backup">Backup</option>
+            <option value="Team">Team</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="auth-mode-section" class="auth-mode-section">
+        <span class="search-label">Sign-In Method</span>
+        <div id="auth-mode-tabs" class="filter-pills auth-mode-pills" role="group" aria-label="Sign-in method"></div>
+        <p id="auth-mode-desc" class="auth-mode-desc"></p>
+      </div>
+
+      <div id="auth-apikey-wrap" class="auth-apikey-wrap" hidden>
+        <div class="auth-apikey-label-row">
+          <label id="auth-apikey-label" class="search-label" for="auth-apikey-input">API Key / Token</label>
+          <a id="auth-apikey-help" class="auth-ext-link" href="#" target="_blank" rel="noopener noreferrer" hidden>Get API Key ↗</a>
+        </div>
+        <input id="auth-apikey-input" class="auth-text-input mono-input" type="password" autocomplete="off" placeholder="Paste key or token…">
+      </div>
+
+      <div class="auth-footer-actions">
+        <button id="auth-start-btn" class="button primary auth-submit-btn" type="button">
+          Continue to Sign In
+        </button>
+      </div>
+    </div>
+
+    <!-- STEP 3: Active Browser / Device Code / Manual Paste Waiting View -->
+    <div id="auth-step-waiting" class="auth-step" hidden>
+      <div class="auth-waiting-box">
+        <div class="auth-waiting-top">
+          <span class="status-dot syncing" aria-hidden="true"></span>
+          <strong id="auth-waiting-title">Waiting for sign-in…</strong>
+        </div>
+        <p id="auth-waiting-instructions" class="auth-waiting-desc"></p>
+
+        <div id="auth-device-box" class="device-code-box" hidden>
+          <span class="device-code-caption">One-time verification code</span>
+          <div class="device-code-row">
+            <code id="auth-device-code" class="device-code-value">----</code>
+            <button id="auth-copy-code-btn" class="button secondary btn-sm" type="button">Copy code</button>
+          </div>
+        </div>
+
+        <div class="auth-waiting-actions">
+          <button id="auth-reopen-btn" class="button primary btn-sm" type="button">Open Sign-In Page ↗</button>
+          <button id="auth-copy-url-btn" class="button secondary btn-sm" type="button">Copy Sign-In Link</button>
+          <button id="auth-cancel-btn" class="button secondary btn-sm" type="button">Cancel</button>
+        </div>
+      </div>
+
+      <div id="auth-manual-wrap" class="auth-manual-wrap" hidden>
+        <label class="search-label" for="auth-manual-input">Signed in from another browser profile? Paste callback URL or code:</label>
+        <div class="auth-manual-row">
+          <input id="auth-manual-input" class="auth-text-input mono-input" type="text" autocomplete="off" placeholder="Paste callback URL or code#state…">
+          <button id="auth-complete-btn" class="button secondary btn-sm" type="button">Verify</button>
+        </div>
+      </div>
+    </div>
+
+    <p id="auth-message" class="auth-message" role="status" aria-live="polite" hidden></p>
+  </dialog>
+
+  <!-- ? INFO DIALOG: ABOUT CHALZTRACKER -->
+  <dialog id="omp-help-dialog" aria-labelledby="omp-help-title">
+    <div class="dialog-header">
+      <div>
+        <span class="dialog-kicker">About ChalzTracker</span>
+        <h2 id="omp-help-title">Your Personal AI Usage Tracker</h2>
+        <p>100% standalone multi-account quota monitor, smart account router, and desktop tray widget.</p>
+      </div>
+      <button id="close-help-dialog" class="icon-button" type="button" aria-label="Close">×</button>
+    </div>
+
+    <div class="omp-help-body">
+      <div class="omp-help-callout">
+        <strong>Unlimited Accounts · Zero External CLI Required</strong>
+        <p>Sign in manually to as many Personal, Work, or Team accounts as you own across Antigravity, OpenAI Codex, Claude, Cursor, Gemini CLI, GitHub Copilot, Kimi Code, xAI Grok, Z.AI, and MiniMax.</p>
+      </div>
+
+      <ol class="omp-steps-list">
+        <li>
+          <strong>★ Smart Account Router &amp; Burn-Rate Pace</strong>
+          <span>Automatically scores every account by bottleneck headroom and expiring-window urgency ("Use before reset!"), while forecasting whether your burn rate is on-pace or running hot.</span>
+        </li>
+        <li>
+          <strong>Desktop Widget, Mini Button &amp; System Tray Alerts</strong>
+          <span>Press <kbd>W</kbd> for the two-pane desktop widget, <kbd>M</kbd> for the compact mini usage pill, or minimize to the Windows System Tray with native 80% / 95% &amp; reset notifications.</span>
+        </li>
+        <li>
+          <strong>Private Local Vault (`~/.chalztracker`)</strong>
+          <span>OAuth tokens and keys never leave your machine except to query official provider usage endpoints directly.</span>
+        </li>
+      </ol>
+
+      <div class="omp-help-actions">
+        <button id="help-open-add" class="button primary btn-sm" type="button">+ Connect an Account</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- NOTIFICATION PREFERENCES DIALOG -->
+  <dialog id="alerts-dialog" aria-labelledby="alerts-dialog-title">
+    <div class="dialog-header">
+      <div>
+        <span class="dialog-kicker">Desktop &amp; Live Alerts</span>
+        <h2 id="alerts-dialog-title">Notification Settings</h2>
+        <p>Get notified automatically the moment a usage window resets or nears its limit.</p>
+      </div>
+      <button id="close-alerts-dialog" class="icon-button" type="button" aria-label="Close">×</button>
+    </div>
+
+    <div class="alerts-dialog-body">
+      <div class="alerts-watcher-banner">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="alerts-watcher-status">Precision Reset Watcher active — monitoring scheduled resets</span>
+      </div>
+
+      <div class="alert-pref-list">
+        <div class="alert-pref-row">
+          <div class="alert-pref-copy">
+            <strong>Usage Reset Notifications</strong>
+            <span>Windows desktop notification + toast as soon as a 5h, daily, weekly, or monthly limit resets.</span>
+          </div>
+          <button id="pref-reset-alerts" class="switch-btn" type="button" role="switch" aria-checked="true" aria-label="Toggle usage reset notifications">
+            <span class="switch-thumb"></span>
+          </button>
+        </div>
+
+        <div class="alert-pref-row">
+          <div class="alert-pref-copy">
+            <strong>Banked &amp; Early Promo Resets</strong>
+            <span>Detect banked reset credits (e.g. OpenAI Codex), expiration warnings, and mid-cycle refreshes.</span>
+          </div>
+          <button id="pref-banked-alerts" class="switch-btn" type="button" role="switch" aria-checked="true" aria-label="Toggle banked and early reset notifications">
+            <span class="switch-thumb"></span>
+          </button>
+        </div>
+
+        <div class="alert-pref-row">
+          <div class="alert-pref-copy">
+            <strong>80% &amp; 95% Threshold Warnings</strong>
+            <span>Warn before an active account runs out of session or weekly headroom.</span>
+          </div>
+          <button id="pref-threshold-alerts" class="switch-btn" type="button" role="switch" aria-checked="true" aria-label="Toggle 80% and 95% threshold warnings">
+            <span class="switch-thumb"></span>
+          </button>
+        </div>
+
+        <div class="alert-pref-row">
+          <div class="alert-pref-copy">
+            <strong>Custom Notification Sound</strong>
+            <span>Unique stereo synth audio instead of the default Windows notification ding.</span>
+          </div>
+          <div class="alert-sound-inline">
+            <select id="alerts-sound-pack-select" class="control-select" aria-label="Notification sound pack">
+              <option value="cyber">Cyber Harmonic</option>
+              <option value="crystal">Crystal Bell</option>
+              <option value="arcade">Retro Power-Up</option>
+              <option value="minimal">Minimal Dewdrop</option>
+              <option value="off">Muted</option>
+            </select>
+            <button id="preview-alert-sound-btn" class="button secondary btn-sm" type="button" title="Preview selected notification sound">
+              Preview
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="alerts-dialog-actions">
+        <button id="test-reset-alert-btn" class="button secondary btn-sm" type="button">
+          Test AI Logo Notification
+        </button>
+        <button id="done-alerts-dialog" class="button primary btn-sm" type="button">
+          Done
+        </button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- UI CUSTOMIZATION STUDIO DIALOG -->
+  <dialog id="customize-dialog" class="customize-dialog" aria-labelledby="customize-dialog-title">
+    <div class="dialog-header">
+      <div>
+        <span class="dialog-kicker">Personalize ChalzTracker</span>
+        <h2 id="customize-dialog-title">UI &amp; Sound Customization</h2>
+        <p>Tailor surface colors, accent theme, grid density, progress bars, and custom notification audio.</p>
+      </div>
+      <button id="close-customize-dialog" class="icon-button" type="button" aria-label="Close">×</button>
+    </div>
+
+    <div class="customize-body">
+      <div class="cust-group">
+        <span class="cust-label">Surface Appearance</span>
+        <div id="cust-surface-pills" class="cust-choice-grid cols-4" role="group" aria-label="Surface appearance">
+          <button type="button" class="cust-choice active" data-surface-choice="obsidian">Obsidian</button>
+          <button type="button" class="cust-choice" data-surface-choice="midnight">Midnight</button>
+          <button type="button" class="cust-choice" data-surface-choice="graphite">Graphite</button>
+          <button type="button" class="cust-choice" data-surface-choice="light">Daylight</button>
+        </div>
+      </div>
+
+      <div class="cust-two-col">
+        <div class="cust-group">
+          <label class="cust-label" for="cust-background-opacity">Window &amp; panel opacity <output id="cust-background-opacity-value" for="cust-background-opacity">100%</output></label>
+          <input id="cust-background-opacity" type="range" min="0" max="100" step="5" value="100" disabled>
+          <span class="cust-hint">Lower opacity to see through panels. Remove the picture to see your desktop.</span>
+        </div>
+        <div class="cust-group">
+          <label class="cust-label" for="cust-background-image">Background picture</label>
+          <input id="cust-background-image" type="file" accept="image/png,image/jpeg,image/webp" disabled>
+          <button id="cust-background-remove" class="button secondary btn-sm" type="button" disabled>Remove picture</button>
+          <span class="cust-hint">PNG, JPEG or WebP, up to 4 MB. Stored locally.</span>
+        </div>
+      </div>
+
+      <div class="cust-group">
+        <span class="cust-label">Brand &amp; Quota Bar Accent</span>
+        <div id="cust-accent-pills" class="cust-swatch-row" role="group" aria-label="Accent color">
+          <button type="button" class="cust-swatch active" data-accent-choice="emerald">
+            <span class="swatch-dot" data-swatch="emerald"></span>
+            <span>Emerald</span>
+          </button>
+          <button type="button" class="cust-swatch" data-accent-choice="cyan">
+            <span class="swatch-dot" data-swatch="cyan"></span>
+            <span>Cyan</span>
+          </button>
+          <button type="button" class="cust-swatch" data-accent-choice="violet">
+            <span class="swatch-dot" data-swatch="violet"></span>
+            <span>Violet</span>
+          </button>
+          <button type="button" class="cust-swatch" data-accent-choice="amber">
+            <span class="swatch-dot" data-swatch="amber"></span>
+            <span>Amber</span>
+          </button>
+          <button type="button" class="cust-swatch" data-accent-choice="rose">
+            <span class="swatch-dot" data-swatch="rose"></span>
+            <span>Rose</span>
+          </button>
+          <button type="button" class="cust-swatch" data-accent-choice="mono">
+            <span class="swatch-dot" data-swatch="mono"></span>
+            <span>Mono</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="cust-two-col">
+        <div class="cust-group">
+          <span class="cust-label">Account Grid Columns</span>
+          <div id="cust-cols-pills" class="cust-choice-grid cols-3" role="group" aria-label="Account grid columns">
+            <button type="button" class="cust-choice" data-cols-choice="1">1 Wide</button>
+            <button type="button" class="cust-choice active" data-cols-choice="2">2 Auto</button>
+            <button type="button" class="cust-choice" data-cols-choice="3">3 Dense</button>
+          </div>
+        </div>
+
+        <div class="cust-group">
+          <span class="cust-label">Card Density</span>
+          <div id="cust-density-pills" class="cust-choice-grid cols-3" role="group" aria-label="Card density">
+            <button type="button" class="cust-choice" data-density-choice="compact">Compact</button>
+            <button type="button" class="cust-choice active" data-density-choice="comfortable">Balanced</button>
+            <button type="button" class="cust-choice" data-density-choice="spacious">Spacious</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="cust-two-col">
+        <div class="cust-group">
+          <span class="cust-label">Progress Bar Style</span>
+          <div id="cust-bar-pills" class="cust-choice-grid cols-3" role="group" aria-label="Progress bar style">
+            <button type="button" class="cust-choice active" data-bar-choice="sleek">Sleek 6px</button>
+            <button type="button" class="cust-choice" data-bar-choice="bold">Bold 10px</button>
+            <button type="button" class="cust-choice" data-bar-choice="glow">Neon Glow</button>
+          </div>
+        </div>
+
+        <div class="cust-group">
+          <span class="cust-label">Notification Sound Pack</span>
+          <div class="cust-sound-row">
+            <select id="cust-sound-pack" class="control-select cust-full-select" aria-label="Notification sound pack">
+              <option value="cyber">Cyber Harmonic</option>
+              <option value="crystal">Crystal Bell</option>
+              <option value="arcade">Retro Power-Up</option>
+              <option value="minimal">Minimal Dewdrop</option>
+              <option value="off">Muted</option>
+            </select>
+            <button id="cust-preview-sound" class="button secondary btn-sm" type="button">Preview</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="cust-toggles-box">
+        <div class="cust-toggle-item">
+          <div>
+            <strong>Show "Best Account Now" Smart Router</strong>
+            <span>Display top account recommendations above your cards</span>
+          </div>
+          <button id="cust-toggle-router" class="switch-btn" type="button" role="switch" aria-checked="true" aria-label="Show Smart Router banner">
+            <span class="switch-thumb"></span>
+          </button>
+        </div>
+
+        <div class="cust-toggle-item">
+          <div>
+            <strong>Show Top KPI Summary Cards</strong>
+            <span>Display the 4 fleet summary cards beneath the header</span>
+          </div>
+          <button id="cust-toggle-kpis" class="switch-btn" type="button" role="switch" aria-checked="true" aria-label="Show top KPI summary cards">
+            <span class="switch-thumb"></span>
+          </button>
+        </div>
+
+        <div class="cust-toggle-item">
+          <div>
+            <strong>Show Burn-Pace Forecast Badges</strong>
+            <span>Display Use Soon, On Pace, and Fast Burn pills on limits</span>
+          </div>
+          <button id="cust-toggle-pace" class="switch-btn" type="button" role="switch" aria-checked="true" aria-label="Show burn pace badges">
+            <span class="switch-thumb"></span>
+          </button>
+        </div>
+      </div>
+
+      <div class="customize-footer">
+        <div class="customize-footer-left">
+          <button id="cust-reset-btn" class="text-button" type="button">Reset defaults</button>
+        </div>
+        <div class="customize-footer-right">
+          <button id="cust-test-notif-btn" class="button secondary btn-sm" type="button">Test AI Logo Alert</button>
+          <button id="done-customize-dialog" class="button primary btn-sm" type="button">Done</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- COMMAND PALETTE DIALOG -->
+  <dialog id="command-dialog" class="command-dialog" aria-label="Command palette">
+    <div class="command-search-bar">
+      <svg class="search-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+        <circle cx="7" cy="7" r="4.5"/>
+        <path d="M10.5 10.5L14 14" stroke-linecap="round"/>
+      </svg>
+      <input id="command-input" type="search" placeholder="Add account, jump to Best Now, switch widget mode, export…" autocomplete="off">
+      <button id="close-command-dialog" class="kbd-button" type="button">Esc</button>
+    </div>
+    <div id="command-list" class="command-list" role="listbox" aria-label="Available commands"></div>
+  </dialog>
+</body>
+</html>

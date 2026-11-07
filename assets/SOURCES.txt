@@ -1,0 +1,12 @@
+Official AI provider brand logos (all rights belong to their respective trademark owners):
+- antigravity.svg: Official Google Antigravity multicolor vector mark extracted from https://commons.wikimedia.org/wiki/File:Google_Antigravity_Logo.svg (Google LLC)
+- icons/antigravity.png: Official Google Antigravity high-resolution icon extracted from Antigravity.exe (Google LLC)
+- openai.svg & icons/codex.png: https://unpkg.com/@lobehub/icons-static-svg/icons/openai.svg & @lobehub/icons-static-png/dark/openai.png (OpenAI)
+- anthropic.svg & icons/claude.png: https://unpkg.com/@lobehub/icons-static-svg/icons/claude-color.svg & @lobehub/icons-static-png/dark/claude-color.png (Anthropic)
+- cursor.svg & icons/cursor.png: https://unpkg.com/@lobehub/icons-static-svg/icons/cursor.svg & @lobehub/icons-static-png/dark/cursor.png (Anysphere)
+- gemini.svg & icons/gemini-cli.png: https://unpkg.com/@lobehub/icons-static-svg/icons/gemini-color.svg & @lobehub/icons-static-png/dark/gemini-color.png (Google)
+- github.svg & icons/copilot.png: https://unpkg.com/@lobehub/icons-static-svg/icons/githubcopilot.svg & @lobehub/icons-static-png/dark/githubcopilot.png (GitHub)
+- kimi.svg & icons/kimi.png: https://unpkg.com/@lobehub/icons-static-svg/icons/kimi.svg & @lobehub/icons-static-png/dark/kimi-color.png (Moonshot AI)
+- xai.svg & icons/xai.png: https://unpkg.com/@lobehub/icons-static-svg/icons/xai.svg & @lobehub/icons-static-png/dark/xai.png (xAI)
+- zai.svg & icons/zai.png: https://unpkg.com/@lobehub/icons-static-svg/icons/zai.svg & @lobehub/icons-static-png/dark/zai.png (Z.AI)
+- minimax.svg & icons/minimax.png: https://unpkg.com/@lobehub/icons-static-svg/icons/minimax-color.svg & @lobehub/icons-static-png/dark/minimax-color.png (MiniMax)

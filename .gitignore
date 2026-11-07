@@ -1,0 +1,8 @@
+# Locally assembled Windows distribution and diagnostics
+/dist-app/
+/release/
+/ChalzTracker.exe
+/electron-lifecycle.txt
+/electron-err.txt
+/electron-rej.txt
+/node_modules/
