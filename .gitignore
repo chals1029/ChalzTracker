@@ -1,12 +1,4 @@
 /src-tauri/target/
-
-# Leftover local artifacts from the former Electron build
-/dist-app/
-/release/
-/ChalzTracker.exe
-/electron-lifecycle.txt
-/electron-err.txt
-/electron-rej.txt
 /node_modules/
 /landing-dist/
 /.vercel/

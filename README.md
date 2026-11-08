@@ -21,12 +21,7 @@ ChalzTracker is an open-source Windows desktop app for monitoring AI subscriptio
 
 ## Built with Rust
 
-Version 2.2 replaced the Electron app with a Rust backend and the system WebView2 runtime. The download is about 30 times smaller and the installed app about 28 times smaller:
-
-| | Electron (v2.1.1) | Rust (v2.2.2) |
-|---|---|---|
-| Download | 143 MB | 4.7 MB |
-| Installed size | 534 MB | 19 MB |
+ChalzTracker is a native app: a Rust backend with the WebView2 runtime built into Windows. The installer is a 4.7 MB download, and the installed app takes 19 MB.
 
 - **Native backend:** Provider requests, token refresh, alerts, and local storage run in one Rust process, which used about 14 MB of private memory in our measurement.
 - **No bundled browser:** The interface is drawn by the Microsoft Edge WebView2 runtime that ships with Windows 10 and 11, rather than a copy of Chromium inside the app. WebView2 accounts for most of the app's memory use; the whole app used about 180 MB of private memory in the same measurement. Memory use varies with your system and connected accounts.
@@ -78,9 +73,6 @@ Available sign-in methods and quota details vary by provider and plan.
 3. Select **Add account**, choose a provider, and follow its sign-in instructions.
 
 ChalzTracker installs for your Windows account only and does not require administrator rights.
-
-**Upgrading from an earlier Electron version:** Quit the old version from its tray menu, then install the new release once. Your accounts and settings in `~/.chalztracker` are kept. The old version cannot update itself to this release; remove its installation folder and shortcuts after the new version is working.
-
 **SmartScreen:** The installer is not code-signed, so Windows may show a warning.
 
 **Uninstall:** Remove ChalzTracker from Windows **Settings > Apps > Installed apps**. Your accounts and settings in `~/.chalztracker` are kept unless you also delete that folder.
@@ -89,7 +81,7 @@ Use **W** to open the compact widget or **M** for the mini button. The app also 
 
 ### Updates
 
-ChalzTracker checks GitHub Releases for updates while the desktop app is running; these requests disclose your IP address to GitHub. When an update is available, use the **Update** button to download and install it, then restart the app. The updater verifies each update's signature against the public key built into ChalzTracker before installing, and keeps your locally stored accounts and settings.
+You only install ChalzTracker once. While it runs, it checks for a new version when it starts and every six hours after that. When one is available, you get a Windows notification and an **Update** button appears in the app. Click it, and ChalzTracker downloads the update, installs it, and restarts itself. Update checks contact GitHub Releases, which can see your IP address. The updater verifies each update's signature against the public key built into ChalzTracker before installing, and keeps your locally stored accounts and settings.
 
 ## Development
 
