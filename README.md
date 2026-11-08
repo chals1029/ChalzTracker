@@ -6,7 +6,7 @@
   <img src="Features/Screenshot%202026-11-08%20063107.png" alt="ChalzTracker dashboard showing account summaries and Smart Router" width="800">
 </div>
 
-ChalzTracker is an open-source Windows desktop app for monitoring AI subscription usage. Connect supported accounts, check quota windows and reset times, and compare available headroom. The app is built with Tauri and Rust and uses the Microsoft Edge WebView2 runtime included with Windows 10 and 11; Node.js and Python are not required to run it.
+ChalzTracker is an open-source Windows desktop app for monitoring AI subscription usage. Connect supported accounts, check quota windows and reset times, and compare available headroom. It is a native Rust app built with Tauri: a 4.7 MB installer, no bundled browser, and no Node.js or Python needed to run it.
 
 ## Features
 
@@ -18,6 +18,19 @@ ChalzTracker is an open-source Windows desktop app for monitoring AI subscriptio
 - **Customization:** Change colors, card layout, opacity, background picture, and notification sounds. Preferences are saved locally.
 - **Account privacy:** Emails are hidden by default. Reveal or hide them per account or across the Usage tab and Account Vault.
 - **Account Vault:** Rename, tag, pin, pause, and manage connected accounts. Account data and settings are stored locally in `~/.chalztracker`.
+
+## Built with Rust
+
+Version 2.2 replaced the Electron app with a Rust backend and the system WebView2 runtime. The download is about 30 times smaller and the installed app about 28 times smaller:
+
+| | Electron (v2.1.1) | Rust (v2.2.2) |
+|---|---|---|
+| Download | 143 MB | 4.7 MB |
+| Installed size | 534 MB | 19 MB |
+
+- **Native backend:** Provider requests, token refresh, alerts, and local storage run in one Rust process, which used about 14 MB of private memory in our measurement.
+- **No bundled browser:** The interface is drawn by the Microsoft Edge WebView2 runtime that ships with Windows 10 and 11, rather than a copy of Chromium inside the app. WebView2 accounts for most of the app's memory use; the whole app used about 180 MB of private memory in the same measurement. Memory use varies with your system and connected accounts.
+- **Light background work:** Usage refreshes reuse one connection pool, and the app checks for updates and Google subscription plans only every six hours.
 
 ## Supported providers
 
