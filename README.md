@@ -60,7 +60,7 @@ Available sign-in methods and quota details vary by provider and plan.
 
 ## How to install
 
-1. Download the Windows x64 installer (`ChalzTracker_<version>_x64-setup.exe`) from the [latest release](https://github.com/chals1029/ChalzTracker/releases/latest).
+1. Download the Windows x64 installer (`ChalzTracker-Setup.exe`) from the [latest release](https://github.com/chals1029/ChalzTracker/releases/latest).
 2. Open it, choose an installation folder, and click **Next**. On the last page, choose whether to launch ChalzTracker and create a desktop shortcut, then click **Finish**.
 3. Select **Add account**, choose a provider, and follow its sign-in instructions.
 
@@ -90,7 +90,7 @@ The installer pages are a customized NSIS template; see [src-tauri/installer/REA
 
 Antigravity sign-in needs a Google OAuth client that is embedded at build time and not stored in this repository. Set `CHALZ_ANTIGRAVITY_CLIENT_ID` and `CHALZ_ANTIGRAVITY_CLIENT_SECRET` before building; without them, the app builds but Antigravity sign-in and token refresh report that the client is missing. Gemini CLI reads `CHALZ_GEMINI_CLI_CLIENT_ID` and `CHALZ_GEMINI_CLI_CLIENT_SECRET` from the environment when the app runs.
 
-For a signed updater installer, set `TAURI_SIGNING_PRIVATE_KEY` to the private key path and run `npx @tauri-apps/cli@2 build`. Keep the private key secure and backed up: installed clients cannot trust future updates signed with a different key. Publish the generated installer and `.sig` file along with a `latest.json` containing the release version and the Windows x86-64 installer URL and signature. Do not publish the private key. The updater reports an error until the latest release includes `latest.json`.
+For a signed updater installer, set `TAURI_SIGNING_PRIVATE_KEY` to the private key path and run `npx @tauri-apps/cli@2 build`. Keep the private key secure and backed up: installed clients cannot trust future updates signed with a different key. Upload the generated installer as `ChalzTracker-Setup.exe`, because the website's download buttons link to `releases/latest/download/ChalzTracker-Setup.exe`. Also publish a `latest.json` containing the release version, that installer's URL as the Windows x86-64 download, and the contents of its `.sig` file as the signature. Do not publish the private key. The updater reports an error until the latest release includes `latest.json`.
 
 The Cursor integration tries Cursor's current-period usage service if the dashboard summary returns HTTP 403. Both endpoints are undocumented and may change; if neither returns usable quota data, the account remains stale rather than displaying invented usage.
 
