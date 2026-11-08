@@ -8,3 +8,4 @@
 /node_modules/
 /landing-dist/
 /.vercel/
+/.env*
