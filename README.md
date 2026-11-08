@@ -91,14 +91,6 @@ On Windows, install Rust, the Microsoft C++ build tools, WebView2 and Node.js, t
 
 The installer pages are a customized NSIS template; see [src-tauri/installer/README.md](src-tauri/installer/README.md).
 
-### Releases
-
-Antigravity sign-in needs a Google OAuth client that is embedded at build time and not stored in this repository. Set `CHALZ_ANTIGRAVITY_CLIENT_ID` and `CHALZ_ANTIGRAVITY_CLIENT_SECRET` before building; without them, the app builds but Antigravity sign-in and token refresh report that the client is missing. Gemini CLI reads `CHALZ_GEMINI_CLI_CLIENT_ID` and `CHALZ_GEMINI_CLI_CLIENT_SECRET` from the environment when the app runs.
-
-For a signed updater installer, set `TAURI_SIGNING_PRIVATE_KEY` to the private key path and run `npx @tauri-apps/cli@2 build`. Keep the private key secure and backed up: installed clients cannot trust future updates signed with a different key. Upload the generated installer as `ChalzTracker-Setup.exe`, because the website's download buttons link to `releases/latest/download/ChalzTracker-Setup.exe`. Also publish a `latest.json` containing the release version, that installer's URL as the Windows x86-64 download, and the contents of its `.sig` file as the signature. Do not publish the private key. The updater reports an error until the latest release includes `latest.json`.
-
-The Cursor integration tries Cursor's current-period usage service if the dashboard summary returns HTTP 403. Both endpoints are undocumented and may change; if neither returns usable quota data, the account remains stale rather than displaying invented usage.
-
 ## License
 
 ChalzTracker source code is available under the [MIT License](LICENSE). Third-party provider logos are owned by their respective rights holders; see [assets/SOURCES.txt](assets/SOURCES.txt).
