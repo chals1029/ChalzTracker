@@ -16,8 +16,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("ChalzTracker")]
 [assembly: AssemblyDescription("ChalzTracker — Your Personal AI Usage Tracker")]
 [assembly: AssemblyProduct("ChalzTracker")]
-[assembly: AssemblyVersion("2.1.0.0")]
-[assembly: AssemblyFileVersion("2.1.0.0")]
+[assembly: AssemblyVersion("2.1.1.0")]
+[assembly: AssemblyFileVersion("2.1.1.0")]
 
 namespace ChalzTrackerApp
 {

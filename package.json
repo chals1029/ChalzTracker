@@ -1,6 +1,6 @@
 {
   "name": "chalztracker",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "ChalzTracker — Your Personal AI Usage Tracker",
   "main": "main.js",
   "scripts": {

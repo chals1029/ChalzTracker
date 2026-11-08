@@ -60,12 +60,11 @@ Available sign-in methods and quota details vary by provider and plan.
 
 ## How to install
 
-1. Download the Windows x64 ZIP from the [latest release](https://github.com/chals1029/ChalzTracker/releases/latest).
-2. Extract the entire downloaded archive to a folder on your computer. Folder paths containing spaces are supported.
-3. Open the extracted folder and double-click **`ChalzTracker.exe`**.
-4. Select **Add account**, choose a provider, and follow its sign-in instructions.
+1. Download the Windows x64 **Setup.exe** from the [latest release](https://github.com/chals1029/ChalzTracker/releases/latest).
+2. Open setup, choose an installation folder, and click **Install**. Then click **Launch**.
+3. Select **Add account**, choose a provider, and follow its sign-in instructions.
 
-Keep the `.exe` together with the rest of the extracted files, including `assets`, `lib`, and `dist-app`. The `.exe` is a launcher and cannot run by itself. Windows may show a SmartScreen warning if the release is unsigned.
+For a portable installation instead, download the Windows x64 ZIP, extract it completely, and run `ChalzTracker.exe` from the extracted folder. Keep the launcher together with `assets`, `lib`, `dist-app`, and the other installed files. The setup and launcher are unsigned, so Windows SmartScreen may show a warning. Setup does not add an entry to Windows Apps & Features; to remove the app, delete its installation folder and Start menu shortcut. Delete `~/.chalztracker` separately only if you also want to remove saved accounts and settings.
 
 Use **W** to open the compact widget or **M** for the mini button. The app also appears in the Windows system tray; use its tray menu to quit.
 
@@ -75,7 +74,7 @@ ChalzTracker checks GitHub Releases for updates while the desktop app is running
 
 Automatic installation requires 64-bit Windows, Windows PowerShell, and Windows Management Instrumentation (WMI). Versions that do not yet include the updater must be updated manually once. Future Windows release ZIPs must include `updater.js` and `updater-helper.ps1` alongside `main.js`, and publish the Windows ZIP with its GitHub SHA-256 digest.
 
-For development, `node server.js --open` requires Node.js 18 or newer. To rebuild the launcher, run `build-exe.cmd`. After replacing the Electron distribution, run `python brand-runtime.py` to regenerate the branded runtime; Python is only needed for that maintenance step.
+For development from a source checkout, `node server.js --open` requires Node.js 18 or newer. To rebuild the launcher, run `build-exe.cmd`. Build setup from an assembled release ZIP with `build-setup.cmd path\to\release.zip path\to\setup.exe`. After replacing the Electron distribution, run `python brand-runtime.py` to regenerate the branded runtime; Python is only needed for that maintenance step.
 
 ## License
 
