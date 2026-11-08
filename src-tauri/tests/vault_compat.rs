@@ -99,6 +99,22 @@ fn threshold_crossings_are_once_per_level_and_rearm_after_reset() {
 }
 
 #[test]
+fn usage_hovering_at_a_threshold_alerts_once_even_across_restarts() {
+    let dir = TempDir::new().unwrap();
+    write_json(&dir, "accounts.json", &json!({"version": 2, "accounts": [{"id": "a", "provider": "antigravity", "label": "Fixture"}]}));
+    let usage = |v: &mut ChalzVault, fraction| v.record_account_usage("a", Some(&report(fraction)), None).unwrap();
+    let mut vault = ChalzVault::new(dir.path().to_owned()).unwrap();
+    assert_eq!(usage(&mut vault, 0.80)[0]["kind"], "warn80");
+    assert!(usage(&mut vault, 0.79).is_empty());
+    assert!(usage(&mut vault, 0.80).is_empty(), "a rolling window dipping under the threshold must not re-alert");
+    assert!(usage(&mut vault, 0.793).is_empty());
+    let mut reopened = ChalzVault::new(dir.path().to_owned()).unwrap();
+    assert!(usage(&mut reopened, 0.80).is_empty(), "restarting below the threshold must remember the sent alert");
+    assert!(usage(&mut reopened, 0.74).is_empty());
+    assert_eq!(usage(&mut reopened, 0.81)[0]["kind"], "warn80", "a clear drop below the threshold re-arms the alert");
+}
+
+#[test]
 fn malformed_stores_are_rejected_and_never_replaced() {
     for (name, malformed) in [("accounts.json", b"{broken".as_slice()), ("history.json", b"{\"snapshots\":[],\"events\":{}}".as_slice())] {
         let dir = TempDir::new().unwrap();
