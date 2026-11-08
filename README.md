@@ -4,7 +4,7 @@
 
 ## Introduction
 
-ChalzTracker is a Windows desktop app for monitoring AI subscription usage in one place. Connect accounts from supported providers, check their quota windows and reset times, and compare which account has the most headroom. The desktop release includes its runtime; Node.js and Python are not required to run it.
+ChalzTracker is an open-source Windows desktop app for monitoring AI subscription usage in one place. Connect accounts from supported providers, check their quota windows and reset times, and compare which account has the most headroom. The desktop release includes its runtime; Node.js and Python are not required to run it.
 
 ![ChalzTracker dashboard showing account summaries and Smart Router](Features/Screenshot%202026-11-08%20063107.png)
 
