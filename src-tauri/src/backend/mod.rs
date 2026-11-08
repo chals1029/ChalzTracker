@@ -37,7 +37,7 @@ impl App {
         let headers = kimi_headers(text(&account["credentials"],"deviceId"));
         let result = providers::fetch_provider_usage(&self.client, &mut account, &headers).await;
         let mut v = self.vault.lock().unwrap();
-        if let Some(existing) = v.accounts.iter_mut().find(|a| text(a,"id")==id) { if existing["credentials"] != original_credentials { return Ok(vec![]); } for key in ["credentials","email","accountId","orgId","orgName","projectId","planType"] { if !account[key].is_null() { existing[key] = account[key].clone(); } } } else { return Ok(vec![]); }
+        if let Some(existing) = v.accounts.iter_mut().find(|a| text(a,"id")==id) { if existing["credentials"] != original_credentials { return Ok(vec![]); } for key in ["credentials","email","accountId","orgId","orgName","projectId","planType","planCheckedAt"] { if !account[key].is_null() { existing[key] = account[key].clone(); } } } else { return Ok(vec![]); }
         let alerts = match result { Ok(report)=>v.record_account_usage(id,Some(&report),None), Err(e)=>v.record_account_usage(id,None,Some(&e)) }.map_err(|e|e.to_string())?; drop(v); self.refresh_results.lock().unwrap().insert(id.to_owned(),(version+1,alerts.clone())); self.alerts(&alerts); Ok(alerts)
     }
     async fn refresh_accounts(&self, id: Option<&str>, force: bool) -> Result<Option<Value>,String> {
@@ -163,10 +163,67 @@ async fn oauth_listener(app: Arc<App>, id:String, flow:Arc<providers::BrowserFlo
         let mut bytes=[0u8;8192];let n=match tokio::time::timeout(Duration::from_secs(3),socket.read(&mut bytes)).await {Ok(Ok(n))=>n,_=>continue};let req=String::from_utf8_lossy(&bytes[..n]);let target=req.lines().next().and_then(|line|{let mut p=line.split_whitespace();if p.next()==Some("GET"){p.next()}else{None}}).unwrap_or("");
         let parsed=match url::Url::parse(&format!("http://127.0.0.1{target}")) {Ok(v) if v.path()==path=>v,_=>{let _=socket.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n").await;continue}};
         let code=parsed.query_pairs().find(|(k,_)|k=="code").map(|(_,v)|v.into_owned());let state=parsed.query_pairs().find(|(k,_)|k=="state").map(|(_,v)|v.into_owned());
-        if !flow.matches_state(state.as_deref()) {let _=socket.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;continue;}
-        let result=if let Some(code)=code {providers::complete_browser_flow(&app.client,&flow,&code,state.as_deref(),false).await} else {Err("Authorization was not completed.".into())};
-        match result {Ok(account)=>{let result=app.finalize(&id,account,None).await;if let Err(e)=result {session_error(&app,&id,&e);}let message=b"Sign-in received. You may close this window.";let response=format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",message.len());let _=socket.write_all(response.as_bytes()).await;let _=socket.write_all(message).await;return;},Err(e)=>{session_error(&app,&id,&e);let _=socket.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;return;}}
+        let name=app.sessions.lock().unwrap().get(&id).map(|s|text(&s.public,"providerName").to_owned()).filter(|n|!n.is_empty()).map_or_else(||"the account".to_owned(),|n|format!("your {n} account"));
+        if !flow.matches_state(state.as_deref()) {let _=socket.write_all(&callback_page(CallbackOutcome::Expired,"This sign-in link has expired","It belongs to an earlier or different sign-in attempt, so ChalzTracker ignored it.","If ChalzTracker is still waiting, finish signing in from the browser tab it opened, or start adding the account again.")).await;continue;}
+        let provider_error=parsed.query_pairs().find(|(k,_)|k=="error").map(|(_,v)|v.into_owned());
+        let result=match (code,provider_error) {
+            (Some(code),_)=>providers::complete_browser_flow(&app.client,&flow,&code,state.as_deref(),false).await,
+            (None,Some(e)) if e=="access_denied"=>Err("Access was denied, or the sign-in was cancelled.".into()),
+            (None,Some(e))=>Err(parsed.query_pairs().find(|(k,_)|k=="error_description").map(|(_,v)|v.into_owned()).unwrap_or(e)),
+            (None,None)=>Err("Authorization was not completed.".into()),
+        };
+        let result=match result {Ok(account)=>app.finalize(&id,account,None).await,Err(e)=>Err(e)};
+        let page=match result {
+            Ok(session)=>{let label=text(&session,"accountLabel");callback_page(CallbackOutcome::Success,"You're signed in",&if label.is_empty(){format!("ChalzTracker connected {name}.")}else{format!("{label} is connected to ChalzTracker.")},"You can close this tab and go back to the app.")},
+            Err(e)=>{session_error(&app,&id,&e);callback_page(CallbackOutcome::Failed,"Sign-in didn't finish",&format!("ChalzTracker couldn't connect {name}. {e}"),"Close this tab, then add the account again in ChalzTracker.")},
+        };
+        let _=socket.write_all(&page).await;return;
     }
+}
+
+#[derive(Clone,Copy)]
+enum CallbackOutcome { Success, Failed, Expired }
+
+const CALLBACK_PAGE: &str = r#"<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="dark light"><title>{{TITLE}} · ChalzTracker</title>
+<style>
+:root{--bg:#0d0d0f;--surface:#141417;--border:rgba(255,255,255,.08);--strong:rgba(255,255,255,.15);--text:#f4f4f6;--muted:#8e8e93;--brand:#30d158;--tone:{{TONE}};--tone-soft:{{TONE_SOFT}}}
+@media (prefers-color-scheme:light){:root{--bg:#f5f5f7;--surface:#fff;--border:rgba(0,0,0,.08);--strong:rgba(0,0,0,.14);--text:#1d1d1f;--muted:#6e6e73}}
+*{box-sizing:border-box;margin:0}
+body{min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(600px 320px at 50% 0%,var(--tone-soft),transparent 70%),var(--bg);color:var(--text);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI Variable Text","Segoe UI",Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+main{width:100%;max-width:440px;padding:32px;border:1px solid var(--border);border-radius:16px;background:var(--surface);box-shadow:0 20px 48px rgba(0,0,0,.35)}
+.brand{display:flex;align-items:center;gap:10px;margin-bottom:28px;font-weight:600;letter-spacing:-.01em}
+.brand svg{width:28px;height:28px}
+.brand span{color:var(--muted);font-weight:500}
+.status{display:grid;place-items:center;width:52px;height:52px;margin-bottom:20px;border-radius:14px;background:var(--tone-soft);color:var(--tone)}
+.status svg{width:26px;height:26px}
+h1{font-size:22px;line-height:1.25;letter-spacing:-.02em;margin-bottom:10px}
+.detail{color:var(--text);opacity:.88;overflow-wrap:anywhere}
+.hint{margin-top:18px;padding-top:18px;border-top:1px solid var(--border);color:var(--muted);font-size:14px}
+</style></head>
+<body><main role="status">
+<div class="brand"><svg viewBox="0 0 36 36" fill="none" aria-hidden="true"><rect x="1" y="1" width="34" height="34" rx="9" fill="var(--bg)" stroke="var(--strong)" stroke-width="1.5"/><path d="M23.5 11.5H14.8C12.7 11.5 11 13.2 11 15.3V20.7C11 22.8 12.7 24.5 14.8 24.5H23.5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M16.5 18H25.5" stroke="var(--brand)" stroke-width="2.8" stroke-linecap="round"/><circle cx="25.5" cy="11.5" r="1.85" fill="var(--brand)"/></svg>Chalz<span>Tracker</span></div>
+<div class="status" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">{{ICON}}</svg></div>
+<h1>{{TITLE}}</h1>
+<p class="detail">{{DETAIL}}</p>
+<p class="hint">{{HINT}}</p>
+</main></body></html>"#;
+
+fn callback_page(outcome:CallbackOutcome, title:&str, detail:&str, hint:&str) -> Vec<u8> {
+    let (status,tone,soft,icon)=match outcome {
+        CallbackOutcome::Success=>("200 OK","#30d158","rgba(48,209,88,.14)",r#"<path d="M5 12.5l4.5 4.5L19 7.5"/>"#),
+        CallbackOutcome::Failed=>("400 Bad Request","#ef4444","rgba(239,68,68,.14)",r#"<path d="M7 7l10 10M17 7L7 17"/>"#),
+        CallbackOutcome::Expired=>("400 Bad Request","#f5a623","rgba(245,166,35,.14)",r#"<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>"#),
+    };
+    let html=CALLBACK_PAGE.replace("{{TONE}}",tone).replace("{{TONE_SOFT}}",soft).replace("{{ICON}}",icon).replace("{{TITLE}}",&escape_html(title)).replace("{{DETAIL}}",&escape_html(detail)).replace("{{HINT}}",&escape_html(hint));
+    let mut response=format!("HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Security-Policy: default-src 'none'; style-src 'unsafe-inline'\r\nCache-Control: no-store\r\nReferrer-Policy: no-referrer\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",html.len()).into_bytes();
+    response.extend_from_slice(html.as_bytes()); response
+}
+
+fn escape_html(s:&str) -> String {
+    let mut out=String::with_capacity(s.len());
+    for c in s.chars() { match c {'&'=>out.push_str("&amp;"),'<'=>out.push_str("&lt;"),'>'=>out.push_str("&gt;"),'"'=>out.push_str("&quot;"),'\''=>out.push_str("&#39;"),_=>out.push(c)} }
+    out
 }
 
 fn read_appearance(dir:&std::path::Path) -> std::io::Result<Value> { match std::fs::read(dir.join("appearance.json")) { Ok(data)=>serde_json::from_slice(&data).map_err(std::io::Error::other),Err(e) if e.kind()==std::io::ErrorKind::NotFound=>Ok(json!({"opacity":100,"image":null})),Err(e)=>Err(e) } }

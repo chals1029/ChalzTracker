@@ -608,29 +608,38 @@ fn google_project(data: &Value) -> Option<&str> {
     data["cloudaicompanionProject"].as_str().or_else(|| data["cloudaicompanionProject"]["id"].as_str()).map(str::trim).filter(|s| !s.is_empty())
 }
 
+const GOOGLE_PLAN_RECHECK_MS: i64 = 6 * 60 * 60 * 1000;
+
+/// Google subscriptions (Google AI Pro, Ultra) are reported in `paidTier`; `currentTier` is the
+/// Code Assist tier, which is named after the product ("Antigravity") even for paying users.
+fn google_plan(data: &Value) -> Option<String> {
+    let name = |tier: &Value| tier["name"].as_str().or_else(|| tier["id"].as_str()).map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned);
+    name(&data["paidTier"]).or_else(|| if data["currentTier"]["id"] == "free-tier" { Some("Free".into()) } else { name(&data["currentTier"]) })
+}
+
 async fn google_identity(client: &Client, account: &mut Value, access: &str, antigravity: bool) {
-    if account["projectId"].as_str().unwrap_or("").is_empty() {
+    let needs_project = account["projectId"].as_str().unwrap_or("").is_empty();
+    let plan_due = account["planCheckedAt"].as_i64().is_none_or(|checked| now_ms() - checked >= GOOGLE_PLAN_RECHECK_MS);
+    if needs_project || plan_due {
         let endpoints: &[&str] = if antigravity { &GOOGLE_ENDPOINTS } else { &GOOGLE_ENDPOINTS[2..] };
         let metadata = json!({"ideType": if antigravity { "ANTIGRAVITY" } else { "IDE_UNSPECIFIED" }, "platform":"PLATFORM_UNSPECIFIED", "pluginType":"GEMINI"});
         for endpoint in endpoints {
             let load = response_json(google_request(client, &format!("{endpoint}/v1internal:loadCodeAssist"), access, antigravity, &json!({"metadata":metadata}))).await;
             if let Ok((status, data)) = load {
                 if !status.is_success() { continue; }
-                let tier = data["currentTier"]["name"].as_str().or_else(|| data["currentTier"]["id"].as_str());
-                if let Some(project) = google_project(&data) {
-                    account["projectId"] = json!(project);
-                    if account["planType"].is_null() { if let Some(tier) = tier { account["planType"] = json!(tier); } }
-                    break;
-                }
+                account["planCheckedAt"] = json!(now_ms());
+                let tier = google_plan(&data);
+                if let Some(plan) = &tier { account["planType"] = json!(plan); }
+                if !needs_project { break; }
+                if let Some(project) = google_project(&data) { account["projectId"] = json!(project); break; }
                 let allowed = data["allowedTiers"].as_array();
                 let default = allowed.and_then(|a| a.iter().find(|t| t["isDefault"] == true).or_else(|| a.first())).and_then(|t| t["id"].as_str()).unwrap_or("free-tier");
                 if let Ok((s, onboard)) = response_json(google_request(client, &format!("{endpoint}/v1internal:onboardUser"), access, antigravity, &json!({"tierId":default, "metadata":metadata}))).await {
                     if s.is_success() {
                         let response = if onboard["response"].is_object() { &onboard["response"] } else { &onboard };
-                        if let Some(project) = google_project(response) { account["projectId"] = json!(project); if account["planType"].is_null() { account["planType"] = json!(default); } break; }
+                        if let Some(project) = google_project(response) { account["projectId"] = json!(project); if tier.is_none() { account["planType"] = json!(if default == "free-tier" { "Free" } else { default }); } break; }
                     }
                 }
-                if account["planType"].is_null() { if let Some(tier) = tier { account["planType"] = json!(tier); } }
                 break;
             }
         }
@@ -1101,5 +1110,24 @@ mod cursor_period_tests {
     fn rejects_missing_included_usage_instead_of_inventing_a_quota() {
         assert!(cursor_period_limits(&json!({"spendLimitUsage":{"individualUsed":0,"individualLimit":10000}}), &Value::Null).is_empty());
         assert!(cursor_period_limits(&json!({"planUsage":{"includedSpend":10,"limit":0}}), &Value::Null).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod google_plan_tests {
+    use super::google_plan;
+    use serde_json::json;
+
+    #[test]
+    fn prefers_the_paid_subscription_over_the_code_assist_tier() {
+        let data = json!({"currentTier":{"id":"free-tier","name":"Antigravity"}, "paidTier":{"id":"g1-pro-tier","name":"Google AI Pro"}});
+        assert_eq!(google_plan(&data).as_deref(), Some("Google AI Pro"));
+    }
+
+    #[test]
+    fn reports_free_instead_of_the_product_name_without_a_subscription() {
+        assert_eq!(google_plan(&json!({"currentTier":{"id":"free-tier","name":"Antigravity"}})).as_deref(), Some("Free"));
+        assert_eq!(google_plan(&json!({"currentTier":{"id":"standard-tier","name":"Gemini Code Assist Standard"}})).as_deref(), Some("Gemini Code Assist Standard"));
+        assert_eq!(google_plan(&json!({})), None);
     }
 }
