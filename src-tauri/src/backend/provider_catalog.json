@@ -1,0 +1,194 @@
+[
+  {
+    "id": "antigravity",
+    "name": "Antigravity",
+    "vendor": "Google",
+    "logo": "/assets/antigravity.svg",
+    "tagline": "Gemini + Claude/GPT 5h & Weekly quotas",
+    "modes": [
+      {
+        "id": "browser",
+        "label": "Google Sign-In (Browser)",
+        "kind": "oauth",
+        "description": "Sign in with any Google account in your browser (supports unlimited Google accounts)."
+      }
+    ]
+  },
+  {
+    "id": "codex",
+    "name": "Codex",
+    "vendor": "OpenAI",
+    "logo": "/assets/openai.svg",
+    "tagline": "ChatGPT 5h, 7d Weekly, Spark & Spend limits",
+    "modes": [
+      {
+        "id": "browser",
+        "label": "Browser OAuth",
+        "kind": "oauth",
+        "description": "Opens OpenAI login in your browser with automatic localhost callback (or paste URL)."
+      },
+      {
+        "id": "device",
+        "label": "Device Code (Any Browser)",
+        "kind": "device",
+        "description": "Port-free 1-time code — ideal for signing into extra accounts in incognito or another browser."
+      }
+    ]
+  },
+  {
+    "id": "claude",
+    "name": "Claude",
+    "vendor": "Anthropic",
+    "logo": "/assets/anthropic.svg",
+    "tagline": "5h Session, 7d Opus/Sonnet & Extra Usage",
+    "modes": [
+      {
+        "id": "browser",
+        "label": "Browser Sign-In",
+        "kind": "oauth",
+        "description": "Opens claude.ai OAuth with automatic localhost callback."
+      },
+      {
+        "id": "code",
+        "label": "Authorize & Paste Code",
+        "kind": "oauth_code",
+        "description": "Opens claude.ai in any browser profile and displays a code#state to paste."
+      },
+      {
+        "id": "token",
+        "label": "Paste OAuth Token",
+        "kind": "api_key",
+        "inputLabel": "Claude OAuth Access Token",
+        "inputPlaceholder": "sk-ant-oat01-...",
+        "description": "Connect directly using an Anthropic OAuth token."
+      }
+    ]
+  },
+  {
+    "id": "cursor",
+    "name": "Cursor",
+    "vendor": "Anysphere",
+    "logo": "/assets/cursor.svg",
+    "tagline": "Cursor Auto/API %, Included Plan & On-Demand",
+    "modes": [
+      {
+        "id": "browser",
+        "label": "Cursor Browser Sign-In",
+        "kind": "poll",
+        "description": "Opens cursor.com DeepControl sign-in and automatically detects completion."
+      },
+      {
+        "id": "apikey",
+        "label": "Cursor User API Key",
+        "kind": "api_key",
+        "inputLabel": "Cursor User API Key",
+        "inputPlaceholder": "crsr_...",
+        "description": "Exchange a Cursor crsr_... key for refreshable session tokens."
+      }
+    ]
+  },
+  {
+    "id": "gemini-cli",
+    "name": "Gemini CLI",
+    "vendor": "Google",
+    "logo": "/assets/gemini.svg",
+    "tagline": "Google Code Assist Pro & Flash model quotas",
+    "modes": [
+      {
+        "id": "browser",
+        "label": "Google Sign-In (Browser)",
+        "kind": "oauth",
+        "description": "Sign in with any Google account for Gemini CLI Code Assist quotas."
+      }
+    ]
+  },
+  {
+    "id": "copilot",
+    "name": "GitHub Copilot",
+    "vendor": "GitHub",
+    "logo": "/assets/github.svg",
+    "tagline": "Premium requests, Chat & Completions quotas",
+    "modes": [
+      {
+        "id": "device",
+        "label": "GitHub Device Code",
+        "kind": "device",
+        "description": "Authorize at github.com/login/device using a 1-time verification code."
+      },
+      {
+        "id": "token",
+        "label": "GitHub Token",
+        "kind": "api_key",
+        "inputLabel": "GitHub OAuth / Personal Access Token",
+        "inputPlaceholder": "gho_... or ghu_...",
+        "description": "Connect directly with a GitHub token that has Copilot access."
+      }
+    ]
+  },
+  {
+    "id": "kimi",
+    "name": "Kimi Code",
+    "vendor": "Moonshot AI",
+    "logo": "/assets/kimi.svg",
+    "tagline": "5h Rate Limit & 7d Weekly coding quotas",
+    "modes": [
+      {
+        "id": "device",
+        "label": "Kimi Device Code",
+        "kind": "device",
+        "description": "Authorize Kimi CLI in your browser via Moonshot device verification."
+      }
+    ]
+  },
+  {
+    "id": "xai",
+    "name": "xAI Grok",
+    "vendor": "xAI",
+    "logo": "/assets/xai.svg",
+    "tagline": "Weekly Grok CLI credits & monthly spend limits",
+    "modes": [
+      {
+        "id": "device",
+        "label": "xAI Device Code",
+        "kind": "device",
+        "description": "Authorize via auth.x.ai device login to monitor Grok CLI credits."
+      }
+    ]
+  },
+  {
+    "id": "zai",
+    "name": "Z.AI GLM",
+    "vendor": "Z.AI",
+    "logo": "/assets/zai.svg",
+    "tagline": "GLM Coding Plan 5h / Weekly token & MCP limits",
+    "modes": [
+      {
+        "id": "apikey",
+        "label": "Z.AI API Key",
+        "kind": "api_key",
+        "inputLabel": "Z.AI Coding Plan API Key",
+        "inputPlaceholder": "Paste API key from z.ai/manage-apikey/apikey-list",
+        "helpUrl": "https://z.ai/manage-apikey/apikey-list",
+        "description": "Connect any Z.AI GLM Coding Plan account via its API key."
+      }
+    ]
+  },
+  {
+    "id": "minimax",
+    "name": "MiniMax",
+    "vendor": "MiniMax",
+    "logo": "/assets/minimax.svg",
+    "tagline": "Token Plan interval & weekly remaining capacity",
+    "modes": [
+      {
+        "id": "apikey",
+        "label": "MiniMax API Key",
+        "kind": "api_key",
+        "inputLabel": "MiniMax Token Plan API Key",
+        "inputPlaceholder": "Paste API key from platform.minimax.io",
+        "helpUrl": "https://platform.minimax.io",
+        "description": "Connect any MiniMax Coding / Token Plan account via its API key."
+      }
+    ]
+  }
+]

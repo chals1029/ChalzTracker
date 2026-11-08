@@ -1,0 +1,8 @@
+{
+  "identifier": "main-loopback",
+  "description": "Desktop bridge for the loopback application window.",
+  "windows": ["main"],
+  "local": false,
+  "remote": { "urls": ["http://127.0.0.1:*/*"] },
+  "permissions": ["core:event:default", "allow-window-action", "allow-notification-permission", "allow-notify", "allow-get-update-status", "allow-install-update"]
+}

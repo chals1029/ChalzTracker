@@ -1,4 +1,6 @@
-# Locally assembled Windows distribution and diagnostics
+/src-tauri/target/
+
+# Leftover local artifacts from the former Electron build
 /dist-app/
 /release/
 /ChalzTracker.exe

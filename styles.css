@@ -2620,6 +2620,30 @@ dialog::backdrop {
   font-size: 12.5px;
   margin-top: 4px;
 }
+.confirm-dialog {
+  width: min(400px, calc(100% - 28px));
+  background: var(--bg-base);
+}
+
+.confirm-dialog .dialog-header p {
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.confirm-actions .confirm-danger {
+  background: var(--usage-crit);
+  border-color: var(--usage-crit);
+  color: #fff;
+}
+
 
 .icon-button {
   width: 28px;

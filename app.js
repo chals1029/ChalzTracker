@@ -4,6 +4,42 @@ let pipWindow = null;
 const $ = id => document.getElementById(id) || (pipWindow && !pipWindow.closed ? pipWindow.document.getElementById(id) : null);
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
+function confirmAction({ title, description, confirmLabel, destructive = false }) {
+  const dialog = document.getElementById('confirm-dialog');
+  if (!dialog || dialog.open) return Promise.resolve(false);
+  const cancel = document.getElementById('confirm-cancel');
+  const accept = document.getElementById('confirm-accept');
+  document.getElementById('confirm-title').textContent = title;
+  document.getElementById('confirm-description').textContent = description;
+  accept.textContent = confirmLabel;
+  accept.classList.toggle('confirm-danger', destructive);
+  dialog.returnValue = '';
+  return new Promise(resolve => {
+    const previousFocus = document.activeElement;
+    const onCancel = () => dialog.close();
+    const onAccept = () => dialog.close('confirm');
+    const onBackdrop = event => {
+      if (event.target !== dialog) return;
+      const rect = dialog.getBoundingClientRect();
+      if (event.clientX < rect.left || event.clientX > rect.right ||
+          event.clientY < rect.top || event.clientY > rect.bottom) dialog.close();
+    };
+    const onClose = () => {
+      cancel.removeEventListener('click', onCancel);
+      accept.removeEventListener('click', onAccept);
+      dialog.removeEventListener('click', onBackdrop);
+      if (previousFocus?.isConnected) previousFocus.focus();
+      resolve(dialog.returnValue === 'confirm');
+    };
+    cancel.addEventListener('click', onCancel);
+    accept.addEventListener('click', onAccept);
+    dialog.addEventListener('click', onBackdrop);
+    dialog.addEventListener('close', onClose, { once: true });
+    dialog.showModal();
+    cancel.focus();
+  });
+}
+
 const DEFAULT_PROVIDERS = [
   {
     id: 'antigravity',
@@ -700,9 +736,11 @@ async function redeemBankedReset(account) {
   if (!account || !account.bankedResets || account.bankedResets.count <= 0) return;
   const lbl = accountLabel(account);
   const count = account.bankedResets.count;
-  const confirmed = window.confirm(
-    `Redeem 1 banked reset credit on "${lbl}" right now?\n\n(${count} banked reset${count > 1 ? 's' : ''} currently available — soonest-expiring credit will be used first.)`
-  );
+  const confirmed = await confirmAction({
+    title: 'Redeem banked reset?',
+    description: `Redeem 1 banked reset credit on "${lbl}" now? ${count} banked reset${count > 1 ? 's are' : ' is'} available; the soonest-expiring credit will be used first.`,
+    confirmLabel: 'Redeem Reset'
+  });
   if (!confirmed) return;
 
   state.busy.add(account.id);
@@ -1424,7 +1462,12 @@ function renderDynamicProviderChips() {
   const container = $('provider-filters');
   if (!container) return;
 
-  const connectedProviders = [...new Set(state.accounts.map(a => providerKey(a)))];
+  const providerCounts = new Map();
+  for (const account of state.accounts) {
+    const key = providerKey(account);
+    providerCounts.set(key, (providerCounts.get(key) || 0) + 1);
+  }
+  const connectedProviders = [...providerCounts.keys()];
   if (state.providerFilter !== 'all' && !connectedProviders.includes(state.providerFilter)) {
     state.providerFilter = 'all';
   }
@@ -1443,7 +1486,7 @@ function renderDynamicProviderChips() {
 
   container.append(makeChip('all', 'All'));
   for (const pk of connectedProviders) {
-    const count = state.accounts.filter(a => providerKey(a) === pk).length;
+    const count = providerCounts.get(pk);
     const info = providerInfo(pk);
     container.append(makeChip(pk, count > 1 ? `${info.name} (${count})` : info.name));
   }
@@ -2537,7 +2580,7 @@ function updateSyncStatus() {
     ? 'Syncing live quotas…'
     : (rel ? `Updated ${rel === 'just now' ? 'just now' : rel}` : 'Ready');
   const widgetSync = $('widget-sync-text');
-  if (widgetSync) widgetSync.textContent = text;
+  if (widgetSync && widgetSync.textContent !== text) widgetSync.textContent = text;
 }
 
 function render() {
@@ -2666,7 +2709,12 @@ async function refreshAccounts(id) {
 }
 
 async function removeAccount(account) {
-  if (!window.confirm(`Remove "${accountLabel(account)}" from ChalzTracker?`)) return;
+  if (!await confirmAction({
+    title: 'Remove account?',
+    description: `Remove "${accountLabel(account)}" from ChalzTracker?`,
+    confirmLabel: 'Remove account',
+    destructive: true
+  })) return;
   state.busy.add(account.id);
   render();
   try {
@@ -3161,7 +3209,12 @@ $('cust-preview-sound')?.addEventListener('click', () => {
   playNotificationSound(pack, 'reset');
 });
 $('cust-test-notif-btn')?.addEventListener('click', sendTestResetNotification);
-$('cust-reset-btn')?.addEventListener('click', () => {
+$('cust-reset-btn')?.addEventListener('click', async () => {
+  if (!await confirmAction({
+    title: 'Reset appearance defaults?',
+    description: 'Restore the default UI appearance and layout, including the dashboard background?',
+    confirmLabel: 'Reset defaults'
+  })) return;
   state.ui = { ...DEFAULT_UI_PREFS };
   saveDashboardAppearance({ opacity: 100, image: null });
   applyUiCustomization(true);
@@ -3438,6 +3491,7 @@ $('command-input')?.addEventListener('keydown', e => {
 
 // Global keyboard shortcuts
 document.addEventListener('keydown', e => {
+  if (document.getElementById('confirm-dialog')?.open) return;
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
     e.preventDefault();
     const dlg = $('command-dialog');

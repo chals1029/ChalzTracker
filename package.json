@@ -2,10 +2,7 @@
   "name": "chalztracker",
   "version": "2.1.1",
   "description": "ChalzTracker — Your Personal AI Usage Tracker",
-  "main": "main.js",
-  "scripts": {
-    "start": "electron ."
-  },
+  "private": true,
   "keywords": [
     "ai",
     "usage-tracker",

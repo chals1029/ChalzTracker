@@ -1,0 +1,7 @@
+# Windows installer resources
+
+`installer.nsi` is based on the Tauri `tauri-cli-v2.12.4` NSIS template. It is a Handlebars template, not the generated `target/.../installer.nsi`. The custom directory and completion pages retain Tauri's install sections, upgrade/uninstall logic, passive and silent paths, and `/R` handling. When updating the Tauri CLI, compare this file against that CLI's upstream `crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi` and merge upstream fixes before shipping.
+
+The NSIS bundle requires this template, `header.bmp` (150×57, 24-bit), `sidebar.bmp` (164×314, 24-bit), and `../../assets/favicon.ico`; their paths are configured relative to `src-tauri/tauri.conf.json`. The sidebar appears on the welcome page and the header appears on standard and custom inner pages. Tauri supplies NSIS, its include files and plugins as part of its normal Windows bundling process. The existing Tauri Windows build prerequisites and updater signing key still apply.
+
+The directory and completion pages use NSIS controls with ChalzTracker's dark palette. Browse opens the Windows/NSIS folder picker, which is not themed by this template; other maintenance, install progress, and uninstall pages retain Tauri/NSIS controls. The interface text added by the custom pages is English. Verify normal installation with a default and custom folder, browsing and cancellation, shortcut and launch choices, install failure, upgrade/uninstall, and passive/silent updates with `/R` behavior in an isolated Windows environment before release.
