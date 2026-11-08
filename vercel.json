@@ -1,0 +1,5 @@
+{
+  "framework": null,
+  "buildCommand": "node landing/build.js",
+  "outputDirectory": "landing-dist"
+}

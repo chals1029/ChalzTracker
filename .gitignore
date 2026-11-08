@@ -6,3 +6,5 @@
 /electron-err.txt
 /electron-rej.txt
 /node_modules/
+/landing-dist/
+/.vercel/

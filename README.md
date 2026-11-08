@@ -76,6 +76,8 @@ Automatic installation requires 64-bit Windows, Windows PowerShell, and Windows 
 
 For development from a source checkout, `node server.js --open` requires Node.js 18 or newer. To rebuild the launcher, run `build-exe.cmd`. Build setup from an assembled release ZIP with `build-setup.cmd path\to\release.zip path\to\setup.exe`. After replacing the Electron distribution, run `python brand-runtime.py` to regenerate the branded runtime; Python is only needed for that maintenance step.
 
+The separate landing page is in `landing/`. To preview it locally with Python, run `python -m http.server 8000` from the repository root, then open `http://localhost:8000/landing/`. Vercel runs `node landing/build.js` and serves the generated `landing-dist/` directory.
+
 ## License
 
 ChalzTracker source code is available under the [MIT License](LICENSE). Third-party provider logos are owned by their respective rights holders; see [assets/SOURCES.txt](assets/SOURCES.txt). The bundled Electron runtime includes its own license notices in `dist-app`.
