@@ -60,7 +60,7 @@ Available sign-in methods and quota details vary by provider and plan.
 
 ## How to install
 
-1. Download the [ChalzTracker ZIP for 64-bit Windows](https://github.com/chals1029/ChalzTracker/releases/download/v2.1.0/ChalzTracker-v2.1.0-Windows-x64.zip).
+1. Download the Windows x64 ZIP from the [latest release](https://github.com/chals1029/ChalzTracker/releases/latest).
 2. Extract the entire downloaded archive to a folder on your computer. Folder paths containing spaces are supported.
 3. Open the extracted folder and double-click **`ChalzTracker.exe`**.
 4. Select **Add account**, choose a provider, and follow its sign-in instructions.
@@ -68,6 +68,12 @@ Available sign-in methods and quota details vary by provider and plan.
 Keep the `.exe` together with the rest of the extracted files, including `assets`, `lib`, and `dist-app`. The `.exe` is a launcher and cannot run by itself. Windows may show a SmartScreen warning if the release is unsigned.
 
 Use **W** to open the compact widget or **M** for the mini button. The app also appears in the Windows system tray; use its tray menu to quit.
+
+### Updates
+
+ChalzTracker checks GitHub Releases for updates while the desktop app is running; these requests disclose your IP address to GitHub. When an update is available, use the **Update** button to download it and restart the app. The updater checks the archive against the SHA-256 digest reported by GitHub and keeps your locally stored accounts and settings. This detects corruption but does not protect against a compromised GitHub release account.
+
+Automatic installation requires 64-bit Windows, Windows PowerShell, and Windows Management Instrumentation (WMI). Versions that do not yet include the updater must be updated manually once. Future Windows release ZIPs must include `updater.js` and `updater-helper.ps1` alongside `main.js`, and publish the Windows ZIP with its GitHub SHA-256 digest.
 
 For development, `node server.js --open` requires Node.js 18 or newer. To rebuild the launcher, run `build-exe.cmd`. After replacing the Electron distribution, run `python brand-runtime.py` to regenerate the branded runtime; Python is only needed for that maintenance step.
 

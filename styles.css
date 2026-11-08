@@ -1190,6 +1190,28 @@ body.is-desktop-app[data-view-mode="pill"] .mini-pill-drag {
   padding: 14px 0 32px;
 }
 
+.desktop-update {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 9px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.desktop-update[data-status="error"] {
+  border-color: var(--usage-warn);
+}
+
+.desktop-update .pill-button {
+  flex-shrink: 0;
+}
+
 /* Top Utility Bar */
 .topbar {
   display: flex;

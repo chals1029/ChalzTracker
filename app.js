@@ -3168,8 +3168,69 @@ $('cust-reset-btn')?.addEventListener('click', () => {
   showToast('Restored default UI appearance & layout');
 });
 
+function setupDesktopUpdates(api) {
+  if (typeof api.getUpdateStatus !== 'function' || typeof api.onUpdateStatus !== 'function' ||
+      typeof api.installUpdate !== 'function') return;
+
+  const panel = $('desktop-update');
+  const message = $('desktop-update-message');
+  const button = $('desktop-update-button');
+  let statusEvents = 0;
+  let installing = false;
+
+  function renderUpdate(update) {
+    if (!update || typeof update.status !== 'string') return;
+    const status = update.status;
+    panel.hidden = !['available', 'downloading', 'installing', 'error'].includes(status);
+    panel.dataset.status = status;
+    button.hidden = status !== 'available' && !(status === 'error' && update.version);
+    button.textContent = status === 'error' ? 'Retry update' : 'Update';
+    button.disabled = installing;
+    if (status === 'available') {
+      message.textContent = update.version ? `ChalzTracker ${update.version} is available.` : 'A ChalzTracker update is available.';
+    } else if (status === 'downloading') {
+      const percent = Number.isFinite(update.percent) ? ` ${Math.round(Math.max(0, Math.min(100, update.percent)))}%` : '';
+      message.textContent = `Downloading update…${percent}`;
+    } else if (status === 'installing') {
+      message.textContent = 'Installing update… ChalzTracker will restart.';
+    } else if (status === 'error') {
+      const detail = update.message ? `Update failed: ${update.message}` : 'Update failed.';
+      message.textContent = update.version
+        ? `${detail} Try the update again.`
+        : `${detail} Updates will be checked again automatically.`;
+    }
+  }
+
+  api.onUpdateStatus(update => {
+    statusEvents++;
+    renderUpdate(update);
+  });
+  const initialEvents = statusEvents;
+  api.getUpdateStatus().then(update => {
+    if (statusEvents === initialEvents) renderUpdate(update);
+  }).catch(() => {
+    if (statusEvents === initialEvents) renderUpdate({ status: 'error', message: 'Could not check update status. Restart ChalzTracker and try again.' });
+  });
+  button.addEventListener('click', async () => {
+    if (installing) return;
+    installing = true;
+    button.disabled = true;
+    const eventsBeforeInstall = statusEvents;
+    try {
+      const update = await api.installUpdate();
+      if (statusEvents === eventsBeforeInstall) renderUpdate(update);
+    } catch {
+      renderUpdate({ status: 'error', message: 'Could not start the update. Restart ChalzTracker and try again.' });
+    } finally {
+      installing = false;
+      button.disabled = false;
+    }
+  });
+}
+
 // Desktop Widget, Mini Pill & System Tray controls
 if (window.desktopAPI) {
+  setupDesktopUpdates(window.desktopAPI);
   document.body.classList.add('is-desktop-app');
   $('desktop-controls')?.removeAttribute('hidden');
   $('desktop-min-btn')?.addEventListener('click', () => window.desktopAPI.minimize());

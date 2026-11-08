@@ -1,7 +1,8 @@
-const { app, BrowserWindow, screen, ipcMain, Tray, Menu, shell } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, Tray, Menu, shell, Notification } = require('electron');
 app.disableHardwareAcceleration();
 const path = require('path');
 const serverModule = require('./server.js');
+const { createUpdater } = require('./updater.js');
 
 const fs = require('fs');
 const logDir = process.env.CHALZTRACKER_HOME || path.join(require('os').homedir(), '.chalztracker');
@@ -66,6 +67,25 @@ let tray = null;
 let currentMode = 'dashboard';
 let isTopmost = false;
 
+const updater = createUpdater({
+  app,
+  dataDir: logDir,
+  broadcast: status => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('update-status', status);
+  },
+  notify: version => {
+    if (!Notification.isSupported()) return;
+    const notification = new Notification({ title: 'ChalzTracker update available', body: `Version ${version} is ready to download.` });
+    notification.on('click', () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      applyMode('dashboard');
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    });
+    notification.show();
+  }
+});
 const gotTheLock = app.requestSingleInstanceLock();
 log('gotTheLock: ' + gotTheLock);
 if (!gotTheLock) {
@@ -194,6 +214,16 @@ async function initApp() {
   }
   log('got port: ' + port);
   const startUrl = `http://127.0.0.1:${port}/`;
+  const isAppFrame = event => event.sender === mainWindow?.webContents && event.senderFrame === mainWindow.webContents.mainFrame && event.senderFrame.url.startsWith(startUrl);
+  ipcMain.handle('update-get-status', event => {
+    if (!isAppFrame(event)) throw new Error('Unauthorized update request.');
+    return updater.getStatus();
+  });
+  ipcMain.handle('update-install', event => {
+    if (!isAppFrame(event)) throw new Error('Unauthorized update request.');
+    return updater.install();
+  });
+  updater.start();
   log('loading url: ' + startUrl);
 
   await mainWindow.loadURL(startUrl);
