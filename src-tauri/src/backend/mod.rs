@@ -230,7 +230,7 @@ fn read_appearance(dir:&std::path::Path) -> std::io::Result<Value> { match std::
 fn save_appearance(dir:&std::path::Path, patch:&Value) -> Result<(),String> {
     if let Some(v)=patch.get("opacity") {if !v.as_u64().is_some_and(|x|x<=100){return Err("Invalid background settings.".into());}}
     if let Some(v)=patch.get("widgetGroupByProvider") {if !v.is_boolean(){return Err("Invalid background settings.".into());}}
-    if let Some(v)=patch.get("ui") {let choices=[("surface",&["obsidian","midnight","graphite","light"][..]),("accent",&["emerald","cyan","violet","amber","rose","mono"][..]),("cols",&["1","2","3"][..]),("density",&["compact","comfortable","spacious"][..]),("barStyle",&["sleek","bold","glow"][..])];if !v.is_object() || choices.iter().any(|(k,vals)|!vals.contains(&text(v,k))) || ["showRouter","showKpis","showPace"].iter().any(|k|!v[*k].is_boolean()) || v.as_object().unwrap().keys().any(|k|!choices.iter().any(|(name,_)|name==k) && !["showRouter","showKpis","showPace"].contains(&k.as_str())) {return Err("Invalid background settings.".into());}}
+    if let Some(v)=patch.get("ui") {let choices=[("surface",&["obsidian","midnight","graphite","glass","light"][..]),("accent",&["emerald","cyan","violet","amber","rose","mono"][..]),("cols",&["1","2","3"][..]),("density",&["compact","comfortable","spacious"][..]),("barStyle",&["sleek","bold","glow"][..])];if !v.is_object() || choices.iter().any(|(k,vals)|!vals.contains(&text(v,k))) || ["showRouter","showKpis","showPace"].iter().any(|k|!v[*k].is_boolean()) || v.as_object().unwrap().keys().any(|k|!choices.iter().any(|(name,_)|name==k) && !["showRouter","showKpis","showPace"].contains(&k.as_str())) {return Err("Invalid background settings.".into());}}
     if let Some(v)=patch.get("image") {if !v.is_null() {let image=v.as_str().ok_or("Invalid background settings.")?;let (kind,data)=image.split_once(";base64,").ok_or("Invalid background settings.")?;let bytes=base64::engine::general_purpose::STANDARD.decode(data).map_err(|_|"Invalid background settings.")?;let valid=bytes.len()<=4*1024*1024 && match kind {"data:image/png"=>bytes.starts_with(b"\x89PNG\r\n\x1a\n"),"data:image/jpeg"=>bytes.starts_with(&[0xff,0xd8,0xff]),"data:image/webp"=>bytes.len()>=12 && &bytes[..4]==b"RIFF" && &bytes[8..12]==b"WEBP",_=>false};if !valid{return Err("Invalid background settings.".into());}}}
     let mut appearance=read_appearance(dir).map_err(|e|e.to_string())?;for key in ["opacity","image","ui","widgetGroupByProvider"] {if let Some(value)=patch.get(key) {appearance[key]=value.clone();}}
     std::fs::create_dir_all(dir).map_err(|e|e.to_string())?;let mut tmp=tempfile::NamedTempFile::new_in(dir).map_err(|e|e.to_string())?;serde_json::to_writer(&mut tmp,&appearance).map_err(|e|e.to_string())?;tmp.persist(dir.join("appearance.json")).map_err(|e|e.to_string())?;Ok(())
@@ -283,4 +283,17 @@ fn tray_transition(app:&App,body:&Value)->Response {
     let active=!(action=="stop" || (action=="toggle" && current.1 && body["hideWindow"]!=true));let hidden=active && body["hideWindow"]!=false;
     let response=if active {json!({"active":true,"hidden":hidden,"message":if hidden {"Minimized to Windows system tray. Left-click the tray icon anytime to toggle ChalzTracker."}else{"Pinned to Windows system tray."}})} else {json!({"active":false,"message":"Removed from Windows system tray."})};
     if (app.native_route)("/api/tray",body,&response).is_err(){return error(StatusCode::SERVICE_UNAVAILABLE,"Could not initialize Windows system tray icon.");}current.1=active;app.reset_wake.notify_one();answer(StatusCode::OK,response)
+}
+
+#[cfg(test)]
+mod appearance_tests {
+    use super::*;
+
+    #[test]
+    fn glass_surface_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let ui = json!({"surface":"glass","accent":"emerald","cols":"2","density":"comfortable","barStyle":"sleek","showRouter":true,"showKpis":true,"showPace":true});
+        save_appearance(dir.path(), &json!({"ui": ui})).unwrap();
+        assert_eq!(read_appearance(dir.path()).unwrap()["ui"]["surface"], "glass");
+    }
 }

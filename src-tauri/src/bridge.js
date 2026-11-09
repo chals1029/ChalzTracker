@@ -47,6 +47,68 @@
     }
     return originalFetch(input, init);
   };
+  // Keep the native window and its hit area aligned with the visible panels.
+  window.addEventListener('DOMContentLoaded', () => {
+    const widget = document.getElementById('widget-shell');
+    const widgetHost = document.getElementById('widget-host');
+    const pill = document.getElementById('mini-pill-dock');
+    const toasts = document.getElementById('toast-container');
+    if (!widget || !widgetHost || !pill) return;
+    let scheduled = false;
+    let last = '';
+    let pendingKey = '';
+    let pendingAttempts = 0;
+    let queue = Promise.resolve();
+    const update = () => {
+      scheduled = false;
+      const mode = document.body.dataset.viewMode;
+      let regions;
+      if (mode === 'dashboard') {
+        const radius = parseFloat(getComputedStyle(document.body).borderTopLeftRadius) || 0;
+        regions = [{ x: 0, y: 0, width: window.innerWidth, height: window.innerHeight, radius }];
+      } else if (mode === 'widget' || mode === 'pill') {
+        const visible = [widget, pill, ...Array.from(toasts?.children || []).slice(-62)]
+          .filter(element => element.getClientRects().length);
+        regions = visible.map(element => {
+          const rect = element.getBoundingClientRect();
+          const radius = parseFloat(getComputedStyle(element).borderTopLeftRadius) || 0;
+          return { x: rect.x, y: rect.y, width: rect.width, height: rect.height,
+            radius: Math.min(radius, rect.width / 2, rect.height / 2) };
+        }).filter(rect => rect.width > 0 && rect.height > 0);
+        if (!regions.length) return;
+      } else { return; }
+      const key = JSON.stringify([window.devicePixelRatio, regions]);
+      if (key === last) return;
+      if (key !== pendingKey) { pendingKey = key; pendingAttempts = 0; }
+      last = key;
+      queue = queue.then(async () => {
+        const status = await invoke('set_glass_regions', { regions });
+        if (status === 'ready') document.documentElement.dataset.nativeBlur = 'true';
+        else delete document.documentElement.dataset.nativeBlur;
+        if (status === 'pending' && pendingAttempts++ < 50) {
+          setTimeout(() => { if (last === key) { last = ''; schedule(); } }, 200);
+        }
+      }).catch(error => {
+        delete document.documentElement.dataset.nativeBlur;
+        last = '';
+        console.error('Could not update glass window shape', error);
+      });
+    };
+    const schedule = () => {
+      if (!scheduled) { scheduled = true; requestAnimationFrame(update); }
+    };
+    const sizeObserver = new ResizeObserver(schedule);
+    [widget, pill, document.body].forEach(element => sizeObserver.observe(element));
+    const visibilityObserver = new MutationObserver(schedule);
+    visibilityObserver.observe(document.body, { attributes: true, attributeFilter: ['class', 'data-view-mode', 'data-pill-expanded'] });
+    [widgetHost, pill].forEach(element => visibilityObserver.observe(element, { attributes: true, attributeFilter: ['hidden'] }));
+    if (toasts) {
+      sizeObserver.observe(toasts);
+      visibilityObserver.observe(toasts, { childList: true });
+    }
+    window.addEventListener('resize', schedule);
+    schedule();
+  });
   document.addEventListener('mousedown', event => {
     if (event.button !== 0 || event.target.closest('button, a, input, textarea, select, [contenteditable]')) return;
     if (event.target.closest('.desktop-titlebar, .widget-chrome, .mini-pill-drag')) {

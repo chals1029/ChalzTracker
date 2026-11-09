@@ -369,6 +369,12 @@
           "markdownDescription": "Enables the notify command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_glass_regions command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-glass-regions",
+          "markdownDescription": "Enables the set_glass_regions command without any pre-configured scope."
+        },
+        {
           "description": "Enables the window_action command without any pre-configured scope.",
           "type": "string",
           "const": "allow-window-action",
@@ -397,6 +403,12 @@
           "type": "string",
           "const": "deny-notify",
           "markdownDescription": "Denies the notify command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_glass_regions command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-glass-regions",
+          "markdownDescription": "Denies the set_glass_regions command without any pre-configured scope."
         },
         {
           "description": "Denies the window_action command without any pre-configured scope.",

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="dark" data-surface="glass">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -181,13 +181,6 @@
           <span id="poll-countdown">60s</span>
         </button>
 
-        <button id="toggle-theme" class="pill-button" type="button" title="Switch between Dark and Light appearance (Shortcut: T)" aria-label="Toggle color theme">
-          <svg class="icon-xs" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-            <circle cx="8" cy="8" r="4"/>
-            <path d="M8 1.8v1.5M8 12.7v1.5M1.8 8h1.5M12.7 8h1.5M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M12.4 3.6l-1.1 1.1M4.7 11.3l-1.1 1.1" stroke-linecap="round"/>
-          </svg>
-          <span id="theme-label">Dark</span>
-        </button>
 
         <button id="open-command" class="pill-button command-trigger" type="button" title="Open command palette (Ctrl+K)" aria-label="Open command palette (Ctrl+K)">
           <svg class="icon-xs" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
@@ -705,21 +698,12 @@
       <div>
         <span class="dialog-kicker">Personalize ChalzTracker</span>
         <h2 id="customize-dialog-title">UI &amp; Sound Customization</h2>
-        <p>Tailor surface colors, accent theme, grid density, progress bars, and custom notification audio.</p>
+        <p>Customize your glass backdrop, accent, layout, progress bars, and notification audio.</p>
       </div>
       <button id="close-customize-dialog" class="icon-button" type="button" aria-label="Close">×</button>
     </div>
 
     <div class="customize-body">
-      <div class="cust-group">
-        <span class="cust-label">Surface Appearance</span>
-        <div id="cust-surface-pills" class="cust-choice-grid cols-4" role="group" aria-label="Surface appearance">
-          <button type="button" class="cust-choice active" data-surface-choice="obsidian">Obsidian</button>
-          <button type="button" class="cust-choice" data-surface-choice="midnight">Midnight</button>
-          <button type="button" class="cust-choice" data-surface-choice="graphite">Graphite</button>
-          <button type="button" class="cust-choice" data-surface-choice="light">Daylight</button>
-        </div>
-      </div>
 
       <div class="cust-two-col">
         <div class="cust-group">

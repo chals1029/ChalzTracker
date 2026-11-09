@@ -145,12 +145,11 @@ const providerAliases = {
   'kimi-code': 'kimi'
 };
 
-const themes = ['dark', 'light'];
 const tabs = ['usage', 'analytics', 'timeline', 'vault'];
 let activeTab = 'usage';
 
 const DEFAULT_UI_PREFS = {
-  surface: 'obsidian',    // 'obsidian' | 'midnight' | 'graphite' | 'light'
+  surface: 'glass',
   accent: 'emerald',      // 'emerald' | 'cyan' | 'violet' | 'amber' | 'rose' | 'mono'
   cols: '2',              // '1' | '2' | '3'
   density: 'comfortable', // 'compact' | 'comfortable' | 'spacious'
@@ -160,7 +159,6 @@ const DEFAULT_UI_PREFS = {
   showPace: true
 };
 
-let lastDarkSurface = 'obsidian';
 let dashboardAppearance = { opacity: 100, image: null };
 let appearanceSaveQueue = Promise.resolve();
 let uiPreferencesChanged = false;
@@ -277,7 +275,6 @@ const state = {
   popoverLayout: false,
   maskIdentities: true,
   identityVisibility: new Map(),
-  theme: 'dark',
   viewMode: 'dashboard', // 'dashboard' | 'widget' | 'pill'
   pillExpanded: false,
   widgetDetailOpen: true,
@@ -533,9 +530,6 @@ function handleIncomingAlert(alert) {
    ============================================================================ */
 
 function syncCustomizeDialogControls() {
-  document.querySelectorAll('#cust-surface-pills [data-surface-choice]').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.surfaceChoice === state.ui.surface);
-  });
   document.querySelectorAll('#cust-accent-pills [data-accent-choice]').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.accentChoice === state.ui.accent);
   });
@@ -561,7 +555,7 @@ function syncCustomizeDialogControls() {
 }
 
 function applyUiCustomization(persist = true) {
-  const surface = ['obsidian', 'midnight', 'graphite', 'light'].includes(state.ui.surface) ? state.ui.surface : 'obsidian';
+  const surface = 'glass';
   const accent = ['emerald', 'cyan', 'violet', 'amber', 'rose', 'mono'].includes(state.ui.accent) ? state.ui.accent : 'emerald';
   const cols = ['1', '2', '3'].includes(String(state.ui.cols)) ? String(state.ui.cols) : '2';
   const density = ['compact', 'comfortable', 'spacious'].includes(state.ui.density) ? state.ui.density : 'comfortable';
@@ -576,9 +570,7 @@ function applyUiCustomization(persist = true) {
   state.ui.showKpis = state.ui.showKpis !== false;
   state.ui.showPace = state.ui.showPace !== false;
 
-  if (surface !== 'light') lastDarkSurface = surface;
-  const resolvedTheme = surface === 'light' ? 'light' : 'dark';
-  state.theme = resolvedTheme;
+  const resolvedTheme = 'dark';
 
   const applyAttrs = rootEl => {
     if (!rootEl) return;
@@ -598,11 +590,6 @@ function applyUiCustomization(persist = true) {
     applyAttrs(pipWindow.document.documentElement);
   }
 
-  const label = $('theme-label');
-  if (label) {
-    const surfaceNames = { obsidian: 'Dark', midnight: 'Midnight', graphite: 'Graphite', light: 'Light' };
-    label.textContent = surfaceNames[surface] || (resolvedTheme === 'dark' ? 'Dark' : 'Light');
-  }
 
   syncCustomizeDialogControls();
 
@@ -623,14 +610,6 @@ function openCustomizeDialog() {
   $('customize-dialog')?.showModal();
 }
 
-function setTheme(themeName, notify = false) {
-  const resolved = themes.includes(themeName) ? themeName : 'dark';
-  state.ui.surface = resolved === 'light' ? 'light' : (lastDarkSurface || 'obsidian');
-  applyUiCustomization(true);
-  if (notify) {
-    showToast(`${resolved === 'dark' ? 'Dark' : 'Light'} appearance active`);
-  }
-}
 
 function syncAlertsButtonUi() {
   const btn = $('toggle-alerts');
@@ -3007,7 +2986,6 @@ function getCommands() {
     { label: 'Notification Settings (Usage Reset & Quota Alerts)', meta: 'Shortcut: N', action: openAlertsDialog },
     { label: 'Send Test AI Logo Notification', meta: 'Desktop Alert', action: sendTestResetNotification },
     { label: state.settings?.alertsEnabled !== false ? 'Mute all desktop notifications' : 'Enable all desktop notifications', meta: 'Alerts', action: toggleAlertsSetting },
-    { label: `Switch to ${state.theme === 'dark' ? 'Light' : 'Dark'} appearance`, meta: 'Shortcut: T', action: () => setTheme(state.theme === 'dark' ? 'light' : 'dark', true) },
     { label: state.showRemaining ? 'Show quota as Used %' : 'Show quota as Remaining %', meta: 'Toggle', action: () => $('quota-mode-toggle')?.click() },
     { label: 'Export All Account Quotas to CSV', meta: 'Export', action: exportFleetCsv }
   ];
@@ -3084,7 +3062,6 @@ try {
   } else {
     const saved = localStorage.getItem('chalz_tracker_theme') || localStorage.getItem('omp_tracker_theme');
     if (saved) legacyUiAvailable = true;
-    if (saved === 'light') state.ui.surface = 'light';
   }
   applyUiCustomization(false);
   const savedGroup = localStorage.getItem('chalz_tracker_widget_group');
@@ -3096,9 +3073,6 @@ try {
 }
 loadDashboardAppearance();
 
-$('toggle-theme')?.addEventListener('click', () => {
-  setTheme(state.theme === 'dark' ? 'light' : 'dark', true);
-});
 $('toggle-alerts')?.addEventListener('click', openAlertsDialog);
 $('timeline-alert-settings-btn')?.addEventListener('click', openAlertsDialog);
 $('close-alerts-dialog')?.addEventListener('click', () => $('alerts-dialog')?.close());
@@ -3170,9 +3144,6 @@ $('cust-background-image')?.addEventListener('change', e => {
 });
 $('cust-background-remove')?.addEventListener('click', () => saveDashboardAppearance({ image: null }));
 
-document.querySelectorAll('#cust-surface-pills [data-surface-choice]').forEach(btn => {
-  btn.addEventListener('click', () => updateUiPref({ surface: btn.dataset.surfaceChoice }));
-});
 document.querySelectorAll('#cust-accent-pills [data-accent-choice]').forEach(btn => {
   btn.addEventListener('click', () => updateUiPref({ accent: btn.dataset.accentChoice }));
 });
@@ -3523,9 +3494,6 @@ document.addEventListener('keydown', e => {
   } else if (e.key.toLowerCase() === 'm' && !e.ctrlKey && !e.metaKey) {
     e.preventDefault();
     setViewMode(state.viewMode === 'pill' ? 'dashboard' : 'pill');
-  } else if (e.key.toLowerCase() === 't' && !e.ctrlKey && !e.metaKey) {
-    e.preventDefault();
-    setTheme(state.theme === 'dark' ? 'light' : 'dark', true);
   } else if (e.key.toLowerCase() === 'n' && !e.ctrlKey && !e.metaKey) {
     e.preventDefault();
     openAlertsDialog();

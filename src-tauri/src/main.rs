@@ -2,6 +2,8 @@
 
 mod backend;
 mod desktop;
+#[cfg(target_os = "windows")]
+mod backdrop;
 mod sound;
 mod updater;
 
@@ -22,7 +24,7 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![desktop::window_action, desktop::notification_permission, desktop::notify, updater::get_update_status, updater::install_update])
+        .invoke_handler(tauri::generate_handler![desktop::window_action, desktop::set_glass_regions, desktop::notification_permission, desktop::notify, updater::get_update_status, updater::install_update])
         .setup(|app| {
             #[cfg(debug_assertions)]
             let resources = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
@@ -89,6 +91,8 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            #[cfg(target_os = "windows")]
+            if window.label() == "main" && matches!(event, WindowEvent::Destroyed) { backdrop::destroy(); }
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if window.state::<desktop::DesktopState>().tray_active.load(std::sync::atomic::Ordering::SeqCst) {
                     api.prevent_close();

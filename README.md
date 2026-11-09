@@ -15,7 +15,7 @@ ChalzTracker is an open-source Windows desktop app for monitoring AI subscriptio
 - **Analytics and reset timeline:** Review usage history, burn-rate forecasts, and upcoming resets.
 - **Compact desktop modes:** Switch to a widget with provider details or a draggable, always-on-top mini button.
 - **Notifications and system tray:** Receive configurable usage and reset alerts, such as “5-Hour usage is at 84% used.” Closing the desktop window hides it to the tray.
-- **Customization:** Change colors, card layout, opacity, background picture, and notification sounds. Preferences are saved locally.
+- **Liquid glass appearance:** Rounded, translucent surfaces across the dashboard, compact widget, and mini button. On Windows 11, the app uses a native blurred backdrop when Windows transparency effects are available; the opacity control applies to all three modes. Otherwise it retains a readable translucent appearance. Customize the accent, layout, background picture, opacity, and notification sounds; preferences are saved locally.
 - **Account privacy:** Emails are hidden by default. Reveal or hide them per account or across the Usage tab and Account Vault.
 - **Account Vault:** Rename, tag, pin, pause, and manage connected accounts. Account data and settings are stored locally in `~/.chalztracker`.
 

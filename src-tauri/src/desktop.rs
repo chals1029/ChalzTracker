@@ -28,6 +28,80 @@ pub struct Dimensions {
     detail_open: Option<bool>,
 }
 
+#[derive(Deserialize)]
+pub struct GlassRegion {
+    pub(crate) x: f64,
+    pub(crate) y: f64,
+    pub(crate) width: f64,
+    pub(crate) height: f64,
+    pub(crate) radius: f64,
+}
+
+#[tauri::command]
+pub async fn set_glass_regions(window: WebviewWindow, regions: Option<Vec<GlassRegion>>) -> Result<&'static str, String> {
+    authorize(&window)?;
+    if let Some(regions) = &regions {
+        if regions.is_empty() || regions.len() > 64 || regions.iter().any(|r|
+            ![r.x, r.y, r.width, r.height, r.radius].iter().all(|v| v.is_finite() && v.abs() <= 10000.0)
+            || r.width <= 0.0 || r.height <= 0.0 || r.radius < 0.0) {
+            return Err("Invalid glass region".into());
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let scale = window.scale_factor().map_err(|e| e.to_string())?;
+        let size = window.inner_size().map_err(|e| e.to_string())?;
+        let hwnd = window.hwnd().map_err(|e| e.to_string())?.0 as isize;
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        window.run_on_main_thread(move || {
+            #[link(name = "gdi32")]
+            extern "system" {
+                fn CreateRoundRectRgn(left: i32, top: i32, right: i32, bottom: i32, width: i32, height: i32) -> isize;
+                fn CombineRgn(dest: isize, src1: isize, src2: isize, mode: i32) -> i32;
+                fn DeleteObject(object: isize) -> i32;
+            }
+            #[link(name = "user32")]
+            extern "system" { fn SetWindowRgn(hwnd: isize, region: isize, redraw: i32) -> i32; }
+            let result = (|| -> Result<&'static str, String> {
+                let mut combined = 0;
+                if let Some(regions) = &regions {
+                    for rect in regions {
+                        let left = (rect.x * scale).floor().clamp(0.0, size.width as f64) as i32;
+                        let top = (rect.y * scale).floor().clamp(0.0, size.height as f64) as i32;
+                        let right = ((rect.x + rect.width) * scale).ceil().clamp(0.0, size.width as f64) as i32;
+                        let bottom = ((rect.y + rect.height) * scale).ceil().clamp(0.0, size.height as f64) as i32;
+                        if right <= left || bottom <= top { continue; }
+                        let diameter = (rect.radius * 2.0 * scale).round().max(1.0) as i32;
+                        let part = unsafe { CreateRoundRectRgn(left, top, right + 1, bottom + 1, diameter, diameter) };
+                        if part == 0 { if combined != 0 { unsafe { DeleteObject(combined); } } return Err("Could not create glass region".into()); }
+                        if combined == 0 { combined = part; } else {
+                            let merged = unsafe { CombineRgn(combined, combined, part, 2) };
+                            unsafe { DeleteObject(part); }
+                            if merged == 0 { unsafe { DeleteObject(combined); } return Err("Could not combine glass regions".into()); }
+                        }
+                    }
+                    if combined == 0 { return Err("Glass regions are outside the window".into()); }
+                }
+                if unsafe { SetWindowRgn(hwnd, combined, 1) } == 0 {
+                    if combined != 0 { unsafe { DeleteObject(combined); } }
+                    return Err("Could not apply glass region".into());
+                }
+                Ok(if let Some(regions) = &regions {
+                    crate::backdrop::update(hwnd, regions, scale, size.width, size.height)
+                } else {
+                    crate::backdrop::destroy();
+                    "unavailable"
+                })
+            })();
+            if result.is_err() { crate::backdrop::destroy(); }
+            let _ = sender.send(result);
+        }).map_err(|e| e.to_string())?;
+        receiver.recv().map_err(|e| e.to_string())?
+    }
+    #[cfg(not(target_os = "windows"))]
+    { let _ = regions; Ok("unavailable") }
+}
+
 pub(crate) fn authorize(window: &WebviewWindow) -> Result<(), String> {
     let url = window.url().map_err(|e| e.to_string())?;
     let state = window.state::<DesktopState>();
