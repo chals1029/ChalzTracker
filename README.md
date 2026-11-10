@@ -91,6 +91,8 @@ The desktop app lives in `src-tauri`: the Rust backend is in `src-tauri/src`, an
 
 On Windows, install Rust, the Microsoft C++ build tools, WebView2 and Node.js, then run `npx @tauri-apps/cli@2 dev` from the checkout. Run the Rust tests with `cargo test --manifest-path src-tauri/Cargo.toml`.
 
+Release builds need `CHALZ_ANTIGRAVITY_CLIENT_ID` and `CHALZ_ANTIGRAVITY_CLIENT_SECRET` in the build process environment for Google Antigravity sign-in. Load the local `~/.tauri/chalztracker-build.env` before invoking Cargo or Tauri; do not commit that file. GitHub installer builds also need the existing `TAURI_SIGNING_PRIVATE_KEY` and its password to produce updater signatures. Build without the `store` feature for the `.exe` installer, and with `--features store` for Microsoft Store.
+
 For Microsoft Store packages, build with `cargo build --release --features store --manifest-path src-tauri/Cargo.toml`, then run `src-tauri/store/package.ps1` in PowerShell. The script packages the release binary and frontend into an unsigned x64 MSIX for Partner Center, using the version in `src-tauri/tauri.conf.json` with a final `.0` component. Install the Windows SDK for `MakeAppx.exe`; Microsoft signs the package during Store processing.
 
 The installer pages are a customized NSIS template; see [src-tauri/installer/README.md](src-tauri/installer/README.md).
