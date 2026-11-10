@@ -13,7 +13,7 @@ use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 
 fn main() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.unminimize();
@@ -22,8 +22,10 @@ fn main() {
             }
         }))
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_opener::init());
+    #[cfg(not(feature = "store"))]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    builder
         .invoke_handler(tauri::generate_handler![desktop::window_action, desktop::set_glass_regions, desktop::notification_permission, desktop::notify, desktop::get_connectivity, updater::get_update_status, updater::install_update])
         .setup(|app| {
             #[cfg(debug_assertions)]
@@ -87,6 +89,7 @@ fn main() {
                 })
                 .build()?;
             desktop::create_tray(app.handle())?;
+            #[cfg(not(feature = "store"))]
             updater::start(app.handle().clone());
             Ok(())
         })

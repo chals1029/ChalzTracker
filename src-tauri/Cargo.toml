@@ -1,7 +1,10 @@
 [package]
 name = "chalztracker"
-version = "2.2.4"
+version = "2.2.5"
 edition = "2021"
+
+[features]
+store = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

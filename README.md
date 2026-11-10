@@ -68,12 +68,12 @@ Available sign-in methods and quota details vary by provider and plan.
 
 ## How to install
 
-1. Download the Windows x64 installer (`ChalzTracker-Setup.exe`) from the [latest release](https://github.com/chals1029/ChalzTracker/releases/latest).
-2. Open it, choose an installation folder, and click **Next**. On the last page, choose whether to launch ChalzTracker and create a desktop shortcut, then click **Finish**.
+1. Install from the [Microsoft Store](https://apps.microsoft.com/detail/9PN35S9FWL4M), or download the Windows x64 installer (`ChalzTracker-Setup.exe`) from the [latest GitHub release](https://github.com/chals1029/ChalzTracker/releases/latest).
+2. If using the GitHub installer, open it, choose an installation folder, and click **Next**. On the last page, choose whether to launch ChalzTracker and create a desktop shortcut, then click **Finish**.
 3. Select **Add account**, choose a provider, and follow its sign-in instructions.
 
 ChalzTracker installs for your Windows account only and does not require administrator rights.
-**SmartScreen:** The installer is not code-signed, so Windows may show a warning.
+**GitHub installer / SmartScreen:** The installer is not code-signed, so Windows may show a warning. Microsoft Store handles package signing for Store installations.
 
 **Uninstall:** Remove ChalzTracker from Windows **Settings > Apps > Installed apps**. Your accounts and settings in `~/.chalztracker` are kept unless you also delete that folder.
 
@@ -81,13 +81,17 @@ Use **W** to open the compact widget or **M** for the mini button. The app also 
 
 ### Updates
 
-You only install ChalzTracker once. While it runs, it checks for a new version when it starts and every six hours after that. When one is available, you get a Windows notification and an **Update** button appears in the app. Click it, and ChalzTracker downloads the update, installs it, and restarts itself. Update checks contact GitHub Releases, which can see your IP address. The updater verifies each update's signature against the public key built into ChalzTracker before installing, and keeps your locally stored accounts and settings.
+**GitHub installer:** While ChalzTracker runs, it checks for a new version when it starts and every six hours after that. When one is available, you get a Windows notification and an **Update** button appears in the app. Click it, and ChalzTracker downloads the update, installs it, and restarts itself. Update checks contact GitHub Releases, which can see your IP address. The updater verifies each update's signature against the public key built into ChalzTracker before installing, and keeps your locally stored accounts and settings.
+
+**Microsoft Store:** Updates are delivered through Microsoft Store. This edition does not use the GitHub installer or its in-app updater.
 
 ## Development
 
 The desktop app lives in `src-tauri`: the Rust backend is in `src-tauri/src`, and the web interface (`index.html`, `app.js`, `styles.css`, `assets`) is bundled from the repository root. The app reads the `~/.chalztracker` data directory; set `CHALZTRACKER_HOME` to an isolated directory when testing so your real accounts are not touched.
 
 On Windows, install Rust, the Microsoft C++ build tools, WebView2 and Node.js, then run `npx @tauri-apps/cli@2 dev` from the checkout. Run the Rust tests with `cargo test --manifest-path src-tauri/Cargo.toml`.
+
+For Microsoft Store packages, build with `cargo build --release --features store --manifest-path src-tauri/Cargo.toml`, then run `src-tauri/store/package.ps1` in PowerShell. The script packages the release binary and frontend into an unsigned x64 MSIX for Partner Center, using the version in `src-tauri/tauri.conf.json` with a final `.0` component. Install the Windows SDK for `MakeAppx.exe`; Microsoft signs the package during Store processing.
 
 The installer pages are a customized NSIS template; see [src-tauri/installer/README.md](src-tauri/installer/README.md).
 

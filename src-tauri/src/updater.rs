@@ -1,19 +1,30 @@
-use std::sync::{atomic::{AtomicBool, Ordering}, Mutex};
+use std::sync::Mutex;
+#[cfg(not(feature = "store"))]
+use std::sync::atomic::{AtomicBool, Ordering};
 use serde_json::{json, Value};
-use tauri::{AppHandle, Manager, WebviewWindow};
+use tauri::{Manager, WebviewWindow};
+#[cfg(not(feature = "store"))]
+use tauri::AppHandle;
+#[cfg(not(feature = "store"))]
 use tauri_plugin_updater::UpdaterExt;
 
 pub struct UpdateState {
     status: Mutex<Value>,
+    #[cfg(not(feature = "store"))]
     busy: AtomicBool,
 }
 
 impl UpdateState {
     pub fn new() -> Self {
-        Self { status: Mutex::new(json!({"status":"idle"})), busy: AtomicBool::new(false) }
+        Self {
+            status: Mutex::new(json!({"status":"idle"})),
+            #[cfg(not(feature = "store"))]
+            busy: AtomicBool::new(false),
+        }
     }
 }
 
+#[cfg(not(feature = "store"))]
 fn update_check_error(error: &tauri_plugin_updater::Error) -> String {
     if matches!(error, tauri_plugin_updater::Error::ReleaseNotFound) {
         return format!("{error}. The update server did not return a successful response; its signed-update manifest may be unavailable.");
@@ -33,6 +44,7 @@ fn update_check_error(error: &tauri_plugin_updater::Error) -> String {
     message
 }
 
+#[cfg(not(feature = "store"))]
 fn publish(app: &AppHandle, value: Value) -> Value {
     *app.state::<UpdateState>().status.lock().unwrap() = value.clone();
     if let Some(window) = app.get_webview_window("main") {
@@ -42,6 +54,7 @@ fn publish(app: &AppHandle, value: Value) -> Value {
     value
 }
 
+#[cfg(not(feature = "store"))]
 fn notify_available(app: &AppHandle, version: &str) {
     let Ok(dir) = crate::backend::data_dir() else { return; };
     let path = dir.join("update-notification.json");
@@ -54,6 +67,7 @@ fn notify_available(app: &AppHandle, version: &str) {
     }
 }
 
+#[cfg(not(feature = "store"))]
 async fn check(app: &AppHandle) {
     let state = app.state::<UpdateState>();
     if state.busy.swap(true, Ordering::AcqRel) { return; }
@@ -73,6 +87,7 @@ async fn check(app: &AppHandle) {
     state.busy.store(false, Ordering::Release);
 }
 
+#[cfg(not(feature = "store"))]
 pub fn start(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         loop {
@@ -90,6 +105,7 @@ pub fn get_update_status(window: WebviewWindow) -> Result<Value, String> {
     Ok(result)
 }
 
+#[cfg(not(feature = "store"))]
 #[tauri::command]
 pub async fn install_update(window: WebviewWindow) -> Result<Value, String> {
     crate::desktop::authorize(&window)?;
@@ -119,5 +135,12 @@ pub async fn install_update(window: WebviewWindow) -> Result<Value, String> {
         Ok(()) => app.restart(),
         Err(error) => Ok(publish(&app, json!({"status":"error","version":version,"message":format!("Could not install update: {error}")}))),
     }
+}
+
+#[cfg(feature = "store")]
+#[tauri::command]
+pub async fn install_update(window: WebviewWindow) -> Result<Value, String> {
+    crate::desktop::authorize(&window)?;
+    Err("Updates are managed by Microsoft Store.".into())
 }
 
