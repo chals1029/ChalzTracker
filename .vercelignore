@@ -3,3 +3,8 @@
 !assets
 !package.json
 !vercel.json
+!Features
+/Features/*
+!/Features/Screenshot 2026-11-08 063107.png
+!/Features/Screenshot 2026-11-08 063250.png
+!/Features/Screenshot 2026-11-08 063153.png
