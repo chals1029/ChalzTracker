@@ -290,6 +290,7 @@ const state = {
   widgetDetailOpen: true,
   widgetGroupByProvider: true,
   selectedAccountId: null,
+  providerAccountSelection: new Map(),
   topmost: false
 };
 
@@ -1002,6 +1003,13 @@ function bestDefaultAccountForGroup(group) {
   return [...group].sort((a, b) => score(b) - score(a))[0];
 }
 
+function selectWidgetAccount(id, remember = true) {
+  const account = state.accounts.find(a => a.id === id);
+  if (!account) return;
+  state.selectedAccountId = id;
+  if (remember) state.providerAccountSelection.set(providerKey(account), id);
+}
+
 function setWidgetGroupByProvider(grouped) {
   state.widgetGroupByProvider = Boolean(grouped);
   widgetGroupingChanged = true;
@@ -1034,7 +1042,11 @@ function widgetMasterEntries(accounts, groupProviders = state.widgetGroupByProvi
   }
   const entries = [];
   for (const [pk, group] of groups.entries()) {
-    const active = group.find(a => a.id === state.selectedAccountId) || bestDefaultAccountForGroup(group) || group[0];
+    const rememberedId = state.providerAccountSelection.get(pk);
+    const active = group.find(a => a.id === state.selectedAccountId)
+      || group.find(a => a.id === rememberedId)
+      || bestDefaultAccountForGroup(group)
+      || group[0];
     entries.push({
       providerKey: pk,
       account: active,
@@ -1221,7 +1233,7 @@ function buildWidgetDetailPane(account) {
     switcher.title = 'Click to cycle between accounts for this provider';
     switcher.addEventListener('click', () => {
       const next = sameProviderAccounts[(currentIdx + 1) % sameProviderAccounts.length];
-      state.selectedAccountId = next.id;
+      selectWidgetAccount(next.id);
       render();
     });
     accGroup.append(switcher);
@@ -1241,7 +1253,7 @@ function buildWidgetDetailPane(account) {
       pill.append(node('span', '', chipLabel), pctSpan);
       pill.title = `${accountLabel(candidate)} (${shownPct})`;
       pill.addEventListener('click', () => {
-        state.selectedAccountId = candidate.id;
+        selectWidgetAccount(candidate.id);
         render();
       });
       pillsWrap.append(pill);
@@ -1296,7 +1308,7 @@ function renderWidgetAndPill() {
           ? providerKey(acc) === providerKey(selectedAccount)
           : acc.id === selectedAccount?.id;
         listEl.append(buildWidgetAccountRow(acc, isSelected, id => {
-          state.selectedAccountId = id;
+          selectWidgetAccount(id, !entry.groupedProvider);
           if (!state.widgetDetailOpen) {
             state.widgetDetailOpen = true;
             $('widget-detail-toggle')?.setAttribute('aria-pressed', 'true');
@@ -1352,7 +1364,7 @@ function renderWidgetAndPill() {
             ? providerKey(acc) === providerKey(activeInPreview)
             : acc.id === activeInPreview?.id;
           master.append(buildWidgetAccountRow(acc, isSelected, id => {
-            state.selectedAccountId = id;
+            selectWidgetAccount(id, !entry.groupedProvider);
             renderWidgetAndPill();
           }, entry));
         }
@@ -1440,7 +1452,7 @@ function renderSmartRouter() {
     card.append(body);
 
     card.addEventListener('click', () => {
-      state.selectedAccountId = rec.accountId;
+      selectWidgetAccount(rec.accountId);
       const cardEl = document.getElementById(`acc-card-${rec.accountId}`);
       if (cardEl) {
         cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
