@@ -264,6 +264,7 @@ const state = {
   authSelectedProvider: 'antigravity',
   authSelectedMode: 'browser',
   authReauthAccountId: null,
+  connectivity: 'unknown',
   lastSyncedAt: null,
   pollSecondsLeft: 60,
   pollPaused: false,
@@ -1381,6 +1382,7 @@ function renderWidgetAndPill() {
       pillPct.dataset.severity = sev;
       pillSummary.textContent = `${seenProviders.size} ${seenProviders.size === 1 ? 'provider' : 'providers'} · ${accounts.length} ${accounts.length === 1 ? 'acct' : 'accts'}`;
     }
+    if (state.connectivity === 'offline') pillSummary.textContent = 'Offline · cached usage';
   }
 }
 
@@ -2079,6 +2081,18 @@ function showAuthStep(stepName) {
   if (wait) wait.hidden = stepName !== 'waiting';
 }
 
+function finishAuthSession(session) {
+  if (session?.duplicate) {
+    showAuthStep('config');
+    const provider = providerInfo(session.provider || state.authSelectedProvider).name;
+    authMessage(`This ${provider} account is already connected. No duplicate was added.`, true);
+    return;
+  }
+  $('add-dialog')?.close();
+  showToast(`Connected ${session?.accountLabel || session?.providerName || providerInfo(state.authSelectedProvider).name}!`);
+  loadAnalytics();
+}
+
 function renderProviderPickerGrid() {
   const grid = $('provider-picker-grid');
   if (!grid) return;
@@ -2250,9 +2264,7 @@ async function beginSelectedAuthFlow() {
     const session = res.session;
 
     if (!session || session.status === 'complete') {
-      $('add-dialog')?.close();
-      showToast(`Connected ${session?.accountLabel || providerInfo(state.authSelectedProvider).name}!`);
-      loadAnalytics();
+      finishAuthSession(session);
       return;
     }
 
@@ -2315,9 +2327,7 @@ async function pollAuthSession(sessionId) {
       state.authSession = null;
       if (Array.isArray(res.accounts)) acceptAccounts(res);
       else await loadAccounts();
-      loadAnalytics();
-      $('add-dialog')?.close();
-      showToast(`Connected ${s.accountLabel || s.providerName}!`);
+      finishAuthSession(s);
       return;
     }
     if (s.status === 'error') {
@@ -2356,9 +2366,7 @@ async function submitManualAuthCode() {
     state.authSession = null;
     if (Array.isArray(res.accounts)) acceptAccounts(res);
     else await loadAccounts();
-    loadAnalytics();
-    $('add-dialog')?.close();
-    showToast(`Connected ${res.session?.accountLabel || 'account'}!`);
+    finishAuthSession(res.session);
   } catch (err) {
     authMessage(err.message, true);
   } finally {
@@ -2552,15 +2560,53 @@ function updateSyncStatus() {
   const dot = $('widget-pulse');
   if (dot) {
     dot.classList.toggle('syncing', isBusy);
-    dot.classList.toggle('paused', state.pollPaused && !isBusy);
+    dot.classList.toggle('paused', (state.pollPaused || state.connectivity === 'offline') && !isBusy);
   }
   const rel = state.lastSyncedAt ? (formatRelativeTime(state.lastSyncedAt) || 'just now') : null;
   const text = isBusy
     ? 'Syncing live quotas…'
     : (rel ? `Updated ${rel === 'just now' ? 'just now' : rel}` : 'Ready');
   const widgetSync = $('widget-sync-text');
-  if (widgetSync && widgetSync.textContent !== text) widgetSync.textContent = text;
+  if (widgetSync) {
+    const statusText = state.connectivity === 'offline' ? 'Offline · cached usage' : text;
+    if (widgetSync.textContent !== statusText) widgetSync.textContent = statusText;
+    widgetSync.dataset.state = state.connectivity === 'offline' ? 'offline' : '';
+    widgetSync.title = state.connectivity === 'offline' ? 'Usage information may be out of date while offline.' : '';
+  }
 }
+
+let connectivityRequest = 0;
+function updateConnectivity(status) {
+  const changed = state.connectivity !== status;
+  state.connectivity = status;
+  const banner = $('network-status');
+  if (banner) {
+    banner.hidden = status !== 'offline';
+    banner.dataset.state = status === 'offline' ? 'offline' : '';
+    banner.textContent = status === 'offline' ? 'Offline — usage information may be out of date.' : '';
+  }
+  updateSyncStatus();
+  if (changed) renderWidgetAndPill();
+}
+
+async function refreshConnectivity() {
+  const requestId = ++connectivityRequest;
+  if (navigator.onLine === false) updateConnectivity('offline');
+  let status = navigator.onLine === false ? 'offline' : 'unknown';
+  if (typeof window.desktopAPI?.getConnectivity === 'function') {
+    try {
+      const reported = await window.desktopAPI.getConnectivity();
+      if (['internet', 'limited', 'offline', 'unknown'].includes(reported)) status = reported;
+    } catch { /* Keep the browser's offline signal or report unknown. */ }
+  }
+  if (requestId === connectivityRequest) updateConnectivity(status);
+}
+
+window.addEventListener('online', refreshConnectivity);
+window.addEventListener('offline', refreshConnectivity);
+window.addEventListener('focus', refreshConnectivity);
+setInterval(refreshConnectivity, 15000);
+refreshConnectivity();
 
 function render() {
   renderDynamicProviderChips();

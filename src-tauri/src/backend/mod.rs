@@ -54,11 +54,11 @@ impl App {
     async fn finalize(self: &Arc<Self>, id: &str, mut account: Value, report: Option<Value>) -> Result<Value,String> {
         let (label,tag,reauth,name,provider) = { let mut sessions=self.sessions.lock().unwrap(); let s=sessions.get_mut(id).ok_or("Sign-in session expired or not found.")?; if s.public["status"] != "pending" { return Err("Sign-in session is no longer pending.".into()); } s.public["status"]=json!("finalizing"); (s.label.clone(),s.tag.clone(),s.reauth.clone(),text(&s.public,"providerName").to_owned(),text(&s.public,"provider").to_owned()) };
         account["provider"]=json!(provider); account["providerName"]=json!(name); account["label"]=json!(label); account["tag"]=json!(tag); account["reauthAccountId"]=json!(reauth);
-        let saved={ let mut v=self.vault.lock().unwrap(); v.upsert_account(&account).map_err(|e|e.to_string())?["account"].clone() };
-        let aid=text(&saved,"id").to_owned();
-        if let Some(r)=report { let alerts=self.vault.lock().unwrap().record_account_usage(&aid,Some(&r),None).map_err(|e|e.to_string())?; self.alerts(&alerts); } else { self.refresh_one(&aid,false).await?; }
-        let session={ let mut sessions=self.sessions.lock().unwrap(); let s=sessions.get_mut(id).ok_or("Sign-in cancelled.")?; s.public["status"]=json!("complete"); s.public["accountId"]=saved["id"].clone(); s.public["accountLabel"]=saved["label"].clone(); s.browser=None; s.public.clone() };
-        self.emit(json!({"type":"accounts_updated","accountId":aid,"label":saved["label"],"provider":provider})); Ok(session)
+        let result={ let mut v=self.vault.lock().unwrap(); v.upsert_account(&account).map_err(|e|e.to_string())? };
+        let saved=&result["account"]; let duplicate=result["duplicate"].as_bool().unwrap_or(false); let aid=text(saved,"id").to_owned();
+        if !duplicate { if let Some(r)=report { let alerts=self.vault.lock().unwrap().record_account_usage(&aid,Some(&r),None).map_err(|e|e.to_string())?; self.alerts(&alerts); } else { self.refresh_one(&aid,false).await?; } }
+        let session={ let mut sessions=self.sessions.lock().unwrap(); let s=sessions.get_mut(id).ok_or("Sign-in cancelled.")?; s.public["status"]=json!("complete"); s.public["duplicate"]=json!(duplicate); s.public["accountId"]=saved["id"].clone(); s.public["accountLabel"]=saved["label"].clone(); s.browser=None; s.public.clone() };
+        if !duplicate { self.emit(json!({"type":"accounts_updated","accountId":aid,"label":saved["label"],"provider":provider})); } Ok(session)
     }
 }
 fn kimi_headers(device: &str) -> reqwest::header::HeaderMap {
@@ -174,6 +174,7 @@ async fn oauth_listener(app: Arc<App>, id:String, flow:Arc<providers::BrowserFlo
         };
         let result=match result {Ok(account)=>app.finalize(&id,account,None).await,Err(e)=>Err(e)};
         let page=match result {
+            Ok(session) if session["duplicate"]==true=>callback_page(CallbackOutcome::Success,"Already connected",&format!("ChalzTracker already has {name} connected. No changes were made to the existing account."),"You can close this tab and go back to the app."),
             Ok(session)=>{let label=text(&session,"accountLabel");callback_page(CallbackOutcome::Success,"You're signed in",&if label.is_empty(){format!("ChalzTracker connected {name}.")}else{format!("{label} is connected to ChalzTracker.")},"You can close this tab and go back to the app.")},
             Err(e)=>{session_error(&app,&id,&e);callback_page(CallbackOutcome::Failed,"Sign-in didn't finish",&format!("ChalzTracker couldn't connect {name}. {e}"),"Close this tab, then add the account again in ChalzTracker.")},
         };

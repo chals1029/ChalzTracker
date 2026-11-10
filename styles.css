@@ -1310,6 +1310,54 @@ body.is-desktop-app[data-view-mode="pill"] .mini-pill-drag {
   font-size: 12px;
 }
 
+#desktop-update[data-status="available"] {
+  border-color: var(--status-ok);
+  background: color-mix(in srgb, var(--status-ok) 18%, var(--bg-base));
+  color: var(--text-primary);
+}
+
+#desktop-update[data-status="available"] .pill-button {
+  border-color: #15803d;
+  background: #15803d;
+  color: #fff;
+  font-weight: 600;
+}
+
+#desktop-update[data-status="available"] .pill-button:hover:not(:disabled) {
+  border-color: #166534;
+  background: #166534;
+  color: #fff;
+}
+
+.network-status:not([hidden]) {
+  margin: 0 0 14px;
+  padding: 9px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.network-status[data-state="offline"] {
+  border-color: var(--usage-warn);
+  background: color-mix(in srgb, var(--usage-warn) 12%, var(--bg-base));
+}
+
+.connection-indicator[data-state] {
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.connection-indicator[data-state="offline"] {
+  color: var(--usage-warn);
+}
+
 .desktop-update[data-status="error"] {
   border-color: var(--usage-warn);
 }

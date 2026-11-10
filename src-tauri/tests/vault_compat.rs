@@ -64,10 +64,11 @@ fn reauth_merges_credentials_without_creating_an_account() {
     assert_eq!(first["created"], true);
     let id = first["account"]["id"].as_str().unwrap().to_owned();
     let updated = vault.upsert_account(&json!({
-        "provider": "openai", "email": "person@example.invalid", "accountId": "remote-id", "orgId": "org-1",
+        "provider": "openai", "email": "person@example.invalid", "accountId": "remote-id", "orgId": "org-1", "reauthAccountId": id,
         "credentials": {"accessToken": "new-token"}
     })).unwrap();
     assert_eq!(updated["created"], false);
+    assert_eq!(updated["duplicate"], false);
     assert_eq!(updated["account"]["id"], id);
     assert_eq!(vault.accounts.len(), 1);
     let reopened = ChalzVault::new(dir.path().to_owned()).unwrap();
@@ -76,6 +77,55 @@ fn reauth_merges_credentials_without_creating_an_account() {
     assert_eq!(account["credentials"]["refreshToken"], "keep-refresh");
     assert_eq!(account["credentials"]["type"], "oauth");
     assert_eq!(reopened.events.iter().map(|e| e["type"].as_str().unwrap()).collect::<Vec<_>>(), vec!["signin", "reauth"]);
+}
+
+#[test]
+fn normal_add_matches_identity_without_modifying_existing_account() {
+    let dir = TempDir::new().unwrap();
+    let mut vault = ChalzVault::new(dir.path().to_owned()).unwrap();
+    let original = vault.upsert_account(&json!({
+        "provider": "openai", "email": "Person@Example.invalid", "accountId": "remote-id", "orgId": "org-1",
+        "label": "Original", "tag": "keep", "credentials": {"type": "oauth", "accessToken": "old"}
+    })).unwrap();
+    assert_eq!(original["duplicate"], false);
+    let accounts_file = fs::read(dir.path().join("accounts.json")).unwrap();
+    let history_file = fs::read(dir.path().join("history.json")).unwrap();
+    for identity in [
+        json!({"accountId": "remote-id", "orgId": "org-1"}),
+        json!({"email": "PERSON@example.invalid", "orgId": "org-1"}),
+    ] {
+        let mut input = json!({"provider": "openai", "label": "Changed", "tag": "changed", "credentials": {"type": "oauth", "accessToken": "new"}});
+        input.as_object_mut().unwrap().extend(identity.as_object().unwrap().clone());
+        let result = vault.upsert_account(&input).unwrap();
+        assert_eq!(result["duplicate"], true);
+        assert_eq!(result["created"], false);
+        assert_eq!(result["account"], original["account"]);
+    }
+    assert_eq!(vault.accounts, vec![original["account"].clone()]);
+    assert_eq!(fs::read(dir.path().join("accounts.json")).unwrap(), accounts_file);
+    assert_eq!(fs::read(dir.path().join("history.json")).unwrap(), history_file);
+}
+
+#[test]
+fn api_key_matches_and_distinct_identities_remain_separate() {
+    let dir = TempDir::new().unwrap();
+    let mut vault = ChalzVault::new(dir.path().to_owned()).unwrap();
+    let key = json!({"provider": "service", "credentials": {"type": "api_key", "apiKey": "key-one"}});
+    let first = vault.upsert_account(&key).unwrap();
+    assert_eq!(vault.upsert_account(&key).unwrap()["duplicate"], true);
+    for input in [
+        json!({"provider": "service", "credentials": {"type": "api_key", "apiKey": "key-two"}}),
+        json!({"provider": "other", "credentials": {"type": "api_key", "apiKey": "key-one"}}),
+        json!({"provider": "openai", "accountId": "remote", "email": "same@example.invalid", "orgId": "org-one"}),
+        json!({"provider": "openai", "accountId": "remote", "email": "same@example.invalid", "orgId": "org-two"}),
+        json!({"provider": "openai", "accountId": "other", "email": "same@example.invalid", "orgId": "org-one"}),
+    ] {
+        let result = vault.upsert_account(&input).unwrap();
+        assert_eq!(result["created"], true);
+        assert_eq!(result["duplicate"], false);
+    }
+    assert_eq!(vault.accounts.len(), 6);
+    assert_eq!(vault.accounts[0], first["account"]);
 }
 
 #[test]

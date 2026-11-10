@@ -25,6 +25,7 @@
     close: () => invoke('window_action', { action: 'close' }),
     toggleTopmost: () => invoke('window_action', { action: 'topmost' }),
     onModeSync: callback => { modeListeners.add(callback); return () => modeListeners.delete(callback); },
+    getConnectivity: () => invoke('get_connectivity'),
     getUpdateStatus: () => invoke('get_update_status'),
     installUpdate: () => invoke('install_update'),
     onUpdateStatus: callback => {

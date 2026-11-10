@@ -98,6 +98,7 @@ impl ChalzVault {
             let same_org = org.is_empty() || text(a,"orgId").is_empty() || text(a,"orgId") == org;
             (!acct.is_empty() && text(a,"accountId") == acct && same_org) || (!email.is_empty() && text(a,"email").to_lowercase() == email && same_org && (acct.is_empty() || text(a,"accountId").is_empty() || text(a,"accountId") == acct)) || (text(&input["credentials"],"type") == "api_key" && !text(&input["credentials"],"apiKey").is_empty() && text(&a["credentials"],"apiKey") == text(&input["credentials"],"apiKey"))
         }));
+        if text(input,"reauthAccountId").is_empty() { if let Some(i)=index { return Ok(json!({"account":self.accounts[i],"created":false,"duplicate":true})); } }
         let created = index.is_none();
         let idx = if let Some(i)=index { i } else {
             let same: Vec<_> = self.accounts.iter().filter(|a| text(a,"provider") == provider).collect();
@@ -113,7 +114,7 @@ impl ChalzVault {
         if let Some(c) = input.get("credentials").and_then(Value::as_object) { if !a["credentials"].is_object() { a["credentials"] = json!({}); } a["credentials"].as_object_mut().unwrap().extend(c.clone()); }
         a["enabled"]=json!(true); a["lastError"]=Value::Null; a["updatedAt"]=json!(now()); let result=a.clone(); self.save_accounts()?;
         self.record_event(if created {"signin"} else {"reauth"},provider,Some(text(&result,"id")),text(&result,"label"),&if created {format!("Connected {name} account")} else {"Updated account credentials".into()},&json!({}))?;
-        Ok(json!({"account":result,"created":created}))
+        Ok(json!({"account":result,"created":created,"duplicate":false}))
     }
 }
 

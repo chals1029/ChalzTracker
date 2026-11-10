@@ -345,6 +345,12 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the get_connectivity command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-connectivity",
+          "markdownDescription": "Enables the get_connectivity command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_update_status command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-update-status",
@@ -379,6 +385,12 @@
           "type": "string",
           "const": "allow-window-action",
           "markdownDescription": "Enables the window_action command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_connectivity command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-connectivity",
+          "markdownDescription": "Denies the get_connectivity command without any pre-configured scope."
         },
         {
           "description": "Denies the get_update_status command without any pre-configured scope.",

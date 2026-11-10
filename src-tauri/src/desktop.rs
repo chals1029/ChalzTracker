@@ -256,6 +256,48 @@ pub fn native_route(app: &tauri::AppHandle, route: &str, body: &Value, result: &
     Ok(())
 }
 
+// Reports the operating system's network classification, not a reachability probe.
+#[tauri::command]
+pub async fn get_connectivity(window: WebviewWindow) -> Result<&'static str, String> {
+    authorize(&window)?;
+    Ok(connectivity())
+}
+
+#[cfg(target_os = "windows")]
+fn connectivity() -> &'static str {
+    use windows::Networking::Connectivity::{ConnectionProfile, INetworkInformationStatics, NetworkConnectivityLevel, NetworkInformation};
+    use windows_core::Interface;
+
+    let Ok(statics) = windows_core::factory::<NetworkInformation, INetworkInformationStatics>() else {
+        return "unknown";
+    };
+    // The generated projection converts a successful null profile into an error.
+    // Call the same WinRT method directly to distinguish no profile from failure.
+    let mut raw = std::ptr::null_mut();
+    let result = unsafe {
+        (Interface::vtable(&statics).GetInternetConnectionProfile)(Interface::as_raw(&statics), &mut raw)
+    };
+    if result.is_err() {
+        return "unknown";
+    }
+    if raw.is_null() {
+        return "offline";
+    }
+    // A successful non-null result owns one COM reference, transferred to the projection.
+    let profile = unsafe { ConnectionProfile::from_raw(raw) };
+    match profile.GetNetworkConnectivityLevel() {
+        Ok(NetworkConnectivityLevel::None) => "offline",
+        Ok(NetworkConnectivityLevel::LocalAccess | NetworkConnectivityLevel::ConstrainedInternetAccess) => "limited",
+        Ok(NetworkConnectivityLevel::InternetAccess) => "internet",
+        _ => "unknown",
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn connectivity() -> &'static str {
+    "unknown"
+}
+
 #[tauri::command]
 pub async fn notification_permission(window: WebviewWindow) -> Result<String, String> {
     authorize(&window)?;

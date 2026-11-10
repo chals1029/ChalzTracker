@@ -27,7 +27,7 @@
             <span class="chalz-text-logo sm">Chalz<span class="chalz-slash">/</span></span><span class="chalz-tracker-tag">Tracker</span>
           </span>
           <span class="widget-chrome-sep" aria-hidden="true">·</span>
-          <span id="widget-sync-text" class="widget-chrome-sub">Updated just now</span>
+          <span id="widget-sync-text" class="widget-chrome-sub connection-indicator" role="status" aria-live="polite">Ready</span>
         </div>
         <div class="widget-chrome-actions">
           <button id="widget-group-toggle" class="chrome-pill-btn" type="button" aria-pressed="true" title="Toggle between grouped providers and all individual accounts">
@@ -193,6 +193,7 @@
       </div>
 
     </div>
+    <div id="network-status" class="network-status" role="status" aria-live="polite" hidden></div>
 
     <div id="desktop-update" class="desktop-update" hidden>
       <span id="desktop-update-message" role="status" aria-live="polite"></span>
