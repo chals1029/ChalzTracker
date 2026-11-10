@@ -227,14 +227,32 @@ fn escape_html(s:&str) -> String {
     out
 }
 
-fn read_appearance(dir:&std::path::Path) -> std::io::Result<Value> { match std::fs::read(dir.join("appearance.json")) { Ok(data)=>serde_json::from_slice(&data).map_err(std::io::Error::other),Err(e) if e.kind()==std::io::ErrorKind::NotFound=>Ok(json!({"opacity":100,"image":null})),Err(e)=>Err(e) } }
+fn write_appearance(dir: &std::path::Path, appearance: &Value) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
+    serde_json::to_writer(&mut tmp, appearance).map_err(std::io::Error::other)?;
+    tmp.persist(dir.join("appearance.json")).map_err(|e| e.error)?;
+    Ok(())
+}
+fn read_appearance(dir: &std::path::Path) -> std::io::Result<Value> {
+    let mut appearance: Value = match std::fs::read(dir.join("appearance.json")) {
+        Ok(data) => serde_json::from_slice(&data).map_err(std::io::Error::other)?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(json!({"opacity":100,"image":null})),
+        Err(e) => return Err(e),
+    };
+    if appearance["ui"]["surface"] == "glass" {
+        appearance["ui"]["surface"] = json!("amoled");
+        write_appearance(dir, &appearance)?;
+    }
+    Ok(appearance)
+}
 fn save_appearance(dir:&std::path::Path, patch:&Value) -> Result<(),String> {
     if let Some(v)=patch.get("opacity") {if !v.as_u64().is_some_and(|x|x<=100){return Err("Invalid background settings.".into());}}
     if let Some(v)=patch.get("widgetGroupByProvider") {if !v.is_boolean(){return Err("Invalid background settings.".into());}}
-    if let Some(v)=patch.get("ui") {let choices=[("surface",&["obsidian","midnight","graphite","glass","light"][..]),("accent",&["emerald","cyan","violet","amber","rose","mono"][..]),("cols",&["1","2","3"][..]),("density",&["compact","comfortable","spacious"][..]),("barStyle",&["sleek","bold","glow"][..])];if !v.is_object() || choices.iter().any(|(k,vals)|!vals.contains(&text(v,k))) || ["showRouter","showKpis","showPace"].iter().any(|k|!v[*k].is_boolean()) || v.as_object().unwrap().keys().any(|k|!choices.iter().any(|(name,_)|name==k) && !["showRouter","showKpis","showPace"].contains(&k.as_str())) {return Err("Invalid background settings.".into());}}
+    if let Some(v)=patch.get("ui") {let choices=[("surface",&["obsidian","midnight","graphite","light","amoled","dusk"][..]),("accent",&["emerald","cyan","violet","amber","rose","mono"][..]),("cols",&["1","2","3"][..]),("density",&["compact","comfortable","spacious"][..]),("barStyle",&["sleek","bold","glow"][..])];if !v.is_object() || choices.iter().any(|(k,vals)|!vals.contains(&text(v,k))) || ["showRouter","showKpis","showPace"].iter().any(|k|!v[*k].is_boolean()) || v.as_object().unwrap().keys().any(|k|!choices.iter().any(|(name,_)|name==k) && !["showRouter","showKpis","showPace"].contains(&k.as_str())) {return Err("Invalid background settings.".into());}}
     if let Some(v)=patch.get("image") {if !v.is_null() {let image=v.as_str().ok_or("Invalid background settings.")?;let (kind,data)=image.split_once(";base64,").ok_or("Invalid background settings.")?;let bytes=base64::engine::general_purpose::STANDARD.decode(data).map_err(|_|"Invalid background settings.")?;let valid=bytes.len()<=4*1024*1024 && match kind {"data:image/png"=>bytes.starts_with(b"\x89PNG\r\n\x1a\n"),"data:image/jpeg"=>bytes.starts_with(&[0xff,0xd8,0xff]),"data:image/webp"=>bytes.len()>=12 && &bytes[..4]==b"RIFF" && &bytes[8..12]==b"WEBP",_=>false};if !valid{return Err("Invalid background settings.".into());}}}
     let mut appearance=read_appearance(dir).map_err(|e|e.to_string())?;for key in ["opacity","image","ui","widgetGroupByProvider"] {if let Some(value)=patch.get(key) {appearance[key]=value.clone();}}
-    std::fs::create_dir_all(dir).map_err(|e|e.to_string())?;let mut tmp=tempfile::NamedTempFile::new_in(dir).map_err(|e|e.to_string())?;serde_json::to_writer(&mut tmp,&appearance).map_err(|e|e.to_string())?;tmp.persist(dir.join("appearance.json")).map_err(|e|e.to_string())?;Ok(())
+    write_appearance(dir, &appearance).map_err(|e| e.to_string())
 }
 fn static_file(root:&std::path::Path,path:&str) -> Response {
     let (name,mime)=match path {"/"|"/index.html"=>("index.html","text/html; charset=utf-8"),"/app.js"=>("app.js","text/javascript; charset=utf-8"),"/styles.css"=>("styles.css","text/css; charset=utf-8"),"/manifest.webmanifest"=>("manifest.webmanifest","application/manifest+json; charset=utf-8"),"/favicon.ico"|"/assets/favicon.ico"=>("assets/favicon.ico","image/x-icon"),p if ["/assets/chalz-logo.svg","/assets/chalz-wordmark.svg","/assets/openai.svg","/assets/antigravity.svg","/assets/cursor.svg","/assets/anthropic.svg","/assets/google.svg","/assets/gemini.svg","/assets/github.svg","/assets/kimi.svg","/assets/xai.svg","/assets/zai.svg","/assets/minimax.svg"].contains(&p)=>( &p[1..],"image/svg+xml"),p if ["/assets/chalz-icon-32.png","/assets/chalz-icon-192.png","/assets/icons/antigravity.png","/assets/icons/codex.png","/assets/icons/openai.png","/assets/icons/claude.png","/assets/icons/cursor.png","/assets/icons/gemini-cli.png","/assets/icons/copilot.png","/assets/icons/kimi.png","/assets/icons/xai.png","/assets/icons/zai.png","/assets/icons/minimax.png"].contains(&p)=>( &p[1..],"image/png"),_=>return (StatusCode::NOT_FOUND,"Not found").into_response()};
@@ -291,10 +309,16 @@ mod appearance_tests {
     use super::*;
 
     #[test]
-    fn glass_surface_round_trips() {
+    fn retired_glass_migrates_without_losing_customization() {
         let dir = tempfile::tempdir().unwrap();
-        let ui = json!({"surface":"glass","accent":"emerald","cols":"2","density":"comfortable","barStyle":"sleek","showRouter":true,"showKpis":true,"showPace":true});
-        save_appearance(dir.path(), &json!({"ui": ui})).unwrap();
-        assert_eq!(read_appearance(dir.path()).unwrap()["ui"]["surface"], "glass");
+        let legacy = json!({"opacity":55,"image":null,"widgetGroupByProvider":false,"ui":{"surface":"glass","accent":"violet","cols":"3","density":"compact","barStyle":"glow","showRouter":true,"showKpis":false,"showPace":true}});
+        let path = dir.path().join("appearance.json");
+        std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+        let mut expected = legacy.clone();
+        expected["ui"]["surface"] = json!("amoled");
+        assert_eq!(read_appearance(dir.path()).unwrap(), expected);
+        assert!(save_appearance(dir.path(), &json!({"ui": legacy["ui"]})).is_err());
+        let persisted: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(persisted, expected);
     }
 }

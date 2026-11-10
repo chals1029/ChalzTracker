@@ -149,7 +149,7 @@ const tabs = ['usage', 'analytics', 'timeline', 'vault'];
 let activeTab = 'usage';
 
 const DEFAULT_UI_PREFS = {
-  surface: 'glass',
+  surface: 'amoled',
   accent: 'emerald',      // 'emerald' | 'cyan' | 'violet' | 'amber' | 'rose' | 'mono'
   cols: '2',              // '1' | '2' | '3'
   density: 'comfortable', // 'compact' | 'comfortable' | 'spacious'
@@ -157,6 +157,15 @@ const DEFAULT_UI_PREFS = {
   showRouter: true,
   showKpis: true,
   showPace: true
+};
+
+const THEME_ACCENTS = {
+  obsidian: 'violet',
+  midnight: 'cyan',
+  graphite: 'mono',
+  light: 'cyan',
+  amoled: null,
+  dusk: 'amber'
 };
 
 let dashboardAppearance = { opacity: 100, image: null };
@@ -531,6 +540,11 @@ function handleIncomingAlert(alert) {
    ============================================================================ */
 
 function syncCustomizeDialogControls() {
+  document.querySelectorAll('#cust-theme-pills [data-surface-choice]').forEach(btn => {
+    const selected = btn.dataset.surfaceChoice === state.ui.surface;
+    btn.classList.toggle('active', selected);
+    btn.setAttribute('aria-pressed', String(selected));
+  });
   document.querySelectorAll('#cust-accent-pills [data-accent-choice]').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.accentChoice === state.ui.accent);
   });
@@ -556,7 +570,7 @@ function syncCustomizeDialogControls() {
 }
 
 function applyUiCustomization(persist = true) {
-  const surface = 'glass';
+  const surface = Object.hasOwn(THEME_ACCENTS, state.ui.surface) ? state.ui.surface : DEFAULT_UI_PREFS.surface;
   const accent = ['emerald', 'cyan', 'violet', 'amber', 'rose', 'mono'].includes(state.ui.accent) ? state.ui.accent : 'emerald';
   const cols = ['1', '2', '3'].includes(String(state.ui.cols)) ? String(state.ui.cols) : '2';
   const density = ['compact', 'comfortable', 'spacious'].includes(state.ui.density) ? state.ui.density : 'comfortable';
@@ -571,7 +585,7 @@ function applyUiCustomization(persist = true) {
   state.ui.showKpis = state.ui.showKpis !== false;
   state.ui.showPace = state.ui.showPace !== false;
 
-  const resolvedTheme = 'dark';
+  const resolvedTheme = surface === 'light' ? 'light' : 'dark';
 
   const applyAttrs = rootEl => {
     if (!rootEl) return;
@@ -3190,6 +3204,12 @@ $('cust-background-image')?.addEventListener('change', e => {
 });
 $('cust-background-remove')?.addEventListener('click', () => saveDashboardAppearance({ image: null }));
 
+document.querySelectorAll('#cust-theme-pills [data-surface-choice]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const surface = btn.dataset.surfaceChoice;
+    updateUiPref({ surface, accent: THEME_ACCENTS[surface] ?? state.ui.accent });
+  });
+});
 document.querySelectorAll('#cust-accent-pills [data-accent-choice]').forEach(btn => {
   btn.addEventListener('click', () => updateUiPref({ accent: btn.dataset.accentChoice }));
 });
