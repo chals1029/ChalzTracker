@@ -18,16 +18,37 @@ pub(crate) fn data_dir() -> Result<PathBuf, String> {
 struct Session { public: Value, created: i64, browser: Option<Arc<providers::BrowserFlow>>, task: Option<tokio::task::AbortHandle>, label: String, tag: String, reauth: String }
 type NativeRoute = Arc<dyn Fn(&str, &Value, &Value) -> Result<(), String> + Send + Sync>;
 struct App { vault: Mutex<ChalzVault>, sessions: Mutex<HashMap<String, Session>>, refresh_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>, refresh_results: Mutex<HashMap<String,(u64,Vec<Value>)>>, client: reqwest::Client, events: broadcast::Sender<Value>, resources: PathBuf, dir: PathBuf, port: u16, window: Mutex<(bool,bool,String)>, notify: Arc<dyn Fn(Value) + Send + Sync>, native_route: NativeRoute, reset_wake: tokio::sync::Notify }
+fn routed_accounts(v: &ChalzVault) -> (Vec<Value>, Vec<Value>) {
+    let at = now();
+    let mut accounts: Vec<_> = v.accounts.iter().map(|a| serialize_account_for_client(a, at)).collect();
+    let recommendations = compute_smart_routing(&mut accounts, at);
+    accounts.sort_by_key(|a| !a["pinned"].as_bool().unwrap_or(false));
+    (accounts, recommendations)
+}
+
 impl App {
     fn emit(&self, v: Value) { let _ = self.events.send(v); }
     fn payload(&self, alerts: Vec<Value>) -> Value {
         self.reset_wake.notify_one();
-        let v = self.vault.lock().unwrap(); let mut accounts: Vec<_> = v.accounts.iter().map(|a| serialize_account_for_client(a, now())).collect();
-        let recommendations = compute_smart_routing(&mut accounts, now()); accounts.sort_by_key(|a| !a["pinned"].as_bool().unwrap_or(false));
+        self.cached_payload(alerts)
+    }
+    fn cached_payload(&self, alerts: Vec<Value>) -> Value {
+        let v = self.vault.lock().unwrap();
+        let (accounts, recommendations) = routed_accounts(&v);
         let mut p = json!({"accounts":accounts,"recommendations":recommendations,"settings":v.settings,"providers":catalog()}); if !alerts.is_empty() { p["alerts"] = json!(alerts); } p
     }
     fn clean_sessions(&self) { let mut sessions = self.sessions.lock().unwrap(); sessions.retain(|_, s| { if now()-s.created > 600_000 { if let Some(t)=s.task.take() { t.abort(); } false } else { true } }); }
-    fn alerts(&self, alerts: &[Value]) { for a in alerts { if self.events.receiver_count()==0 { (self.notify)(a.clone()); } else { let mut a=a.clone(); a["nativeSoundHandled"]=json!(false); self.emit(json!({"type":"alert","alert":a})); } } }
+    fn alerts(&self, alerts: &[Value]) {
+        for alert in alerts {
+            let native = self.events.receiver_count() == 0 || matches!(text(alert, "kind"), "banked_grant" | "banked_expiring");
+            if native { (self.notify)(alert.clone()); }
+            if self.events.receiver_count() > 0 {
+                let mut event = alert.clone();
+                event["nativeSoundHandled"] = json!(native);
+                self.emit(json!({"type":"alert","alert":event}));
+            }
+        }
+    }
     async fn refresh_one(&self, id: &str, force_banked: bool) -> Result<Vec<Value>,String> {
         let version=self.refresh_results.lock().unwrap().get(id).map_or(0,|v|v.0); let lock={let mut locks=self.refresh_locks.lock().unwrap();locks.entry(id.to_owned()).or_insert_with(||Arc::new(tokio::sync::Mutex::new(()))).clone()}; let _guard=lock.lock().await;
         if let Some((generation,alerts))=self.refresh_results.lock().unwrap().get(id) {if *generation!=version {return Ok(alerts.clone());}}
@@ -73,15 +94,22 @@ fn error(status: StatusCode, message: &str) -> Response { answer(status,json!({"
 fn merge(mut a: Value, b: Value) -> Value { if let (Some(a),Some(b))=(a.as_object_mut(),b.as_object()) { a.extend(b.clone()); } a }
 fn open_browser(url: &str) { #[cfg(target_os="windows")] { let _=std::process::Command::new("rundll32").args(["url.dll,FileProtocolHandler",url]).spawn(); } #[cfg(target_os="macos")] { let _=std::process::Command::new("open").arg(url).spawn(); } #[cfg(all(unix,not(target_os="macos")))] { let _=std::process::Command::new("xdg-open").arg(url).spawn(); } }
 
-pub struct BackendHandle { pub port: u16, shutdown: Option<oneshot::Sender<()>>, thread: Option<std::thread::JoinHandle<()>> }
+pub struct BackendHandle { pub port: u16, app: Arc<App>, shutdown: Option<oneshot::Sender<()>>, thread: Option<std::thread::JoinHandle<()>> }
+impl BackendHandle {
+    /// Read the same cached account state used by the API without refreshing providers.
+    pub fn account_snapshot(&self) -> Vec<Value> {
+        let vault = self.app.vault.lock().unwrap();
+        routed_accounts(&vault).0
+    }
+}
 impl Drop for BackendHandle { fn drop(&mut self) { if let Some(s)=self.shutdown.take() { let _=s.send(()); } if let Some(t)=self.thread.take() { let _=t.join(); } } }
 pub fn start(notify: Arc<dyn Fn(Value) + Send + Sync>, native_route: NativeRoute) -> Result<BackendHandle,Box<dyn std::error::Error>> {
     let dir=data_dir().map_err(std::io::Error::other)?; let vault=ChalzVault::new(dir.clone())?; let client=providers::provider_client().map_err(std::io::Error::other)?;
     let resources=PathBuf::from(std::env::var_os("CHALZ_APP_RESOURCES").ok_or("CHALZ_APP_RESOURCES is not set")?);
     let listener=std::net::TcpListener::bind(("127.0.0.1",0))?; listener.set_nonblocking(true)?; let port=listener.local_addr()?.port();
     let (events,_)=broadcast::channel(256); let app=Arc::new(App { vault:Mutex::new(vault), sessions:Mutex::new(HashMap::new()), refresh_locks:Mutex::new(HashMap::new()), refresh_results:Mutex::new(HashMap::new()),client,events,resources,dir,port,window:Mutex::new((false,false,"dashboard".into())),notify,native_route,reset_wake:tokio::sync::Notify::new() });
-    let (shutdown,rx)=oneshot::channel(); let thread=std::thread::spawn(move || { let rt=tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("backend runtime"); rt.block_on(async move { let listener=tokio::net::TcpListener::from_std(listener).expect("backend listener"); tokio::spawn(background(app.clone())); let router=Router::new().fallback(any(handle)).layer(DefaultBodyLimit::max(4*1024*1024*4/3+1024)).with_state(app); tokio::select! { _=rx=>{}, _=async { let _=axum::serve(listener,router.into_make_service_with_connect_info::<SocketAddr>()).await; }=>{} } }); });
-    Ok(BackendHandle { port, shutdown:Some(shutdown), thread:Some(thread) })
+    let (shutdown,rx)=oneshot::channel(); let runtime_app=app.clone(); let thread=std::thread::spawn(move || { let rt=tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("backend runtime"); rt.block_on(async move { let listener=tokio::net::TcpListener::from_std(listener).expect("backend listener"); tokio::spawn(background(runtime_app.clone())); let router=Router::new().fallback(any(handle)).layer(DefaultBodyLimit::max(4*1024*1024*4/3+1024)).with_state(runtime_app); tokio::select! { _=rx=>{}, _=async { let _=axum::serve(listener,router.into_make_service_with_connect_info::<SocketAddr>()).await; }=>{} } }); });
+    Ok(BackendHandle { port, app, shutdown:Some(shutdown), thread:Some(thread) })
 }
 async fn handle(State(app): State<Arc<App>>, method: Method, uri: Uri, headers: HeaderMap, body: Bytes) -> Response {
     let origin=format!("http://127.0.0.1:{}",app.port); let host=format!("127.0.0.1:{}",app.port);

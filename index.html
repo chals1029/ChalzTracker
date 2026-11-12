@@ -15,6 +15,12 @@
   <script src="/app.js" defer></script>
 </head>
 <body data-view-mode="dashboard">
+  <div class="startup-reveal" aria-hidden="true">
+    <div class="startup-reveal-brand">
+      <img src="/assets/chalz-logo.svg" alt="" width="72" height="72">
+      <span>ChalzTracker</span>
+    </div>
+  </div>
   <!-- ======================================================================
        COMPACT DESKTOP WIDGET & TRAY POPOVER
        ====================================================================== -->
@@ -347,8 +353,14 @@
           <div class="smart-router-title-wrap">
             <span class="router-spark" aria-hidden="true">★</span>
             <strong>Best Account To Use Right Now</strong>
-            <span class="smart-router-hint">Auto-scored by bottleneck headroom &amp; expiring-window urgency</span>
+            <span class="smart-router-hint">Rank eligible accounts by your chosen priority</span>
           </div>
+          <select id="router-priority" class="control-select" aria-label="Router priority">
+            <option value="balanced">Balanced (existing score)</option>
+            <option value="capacity">Most capacity</option>
+            <option value="expiry">Soonest reset with capacity</option>
+            <option value="preferred">Preferred (pinned) account</option>
+          </select>
         </div>
         <div id="smart-router-bar" class="smart-router-grid"></div>
       </section>
@@ -417,6 +429,7 @@
           <p>Fleet capacity share, window burn-rate forecasting, and historical usage trajectory.</p>
         </div>
         <div class="usage-controls">
+          <button id="copy-share-summary" class="chip-toggle" type="button" title="Copy a summary without account names or emails">Copy private summary</button>
           <button id="export-fleet-csv" class="chip-toggle" type="button" title="Export all current account quota windows to CSV">
             Export Quotas CSV
           </button>
@@ -433,6 +446,12 @@
           <p>Chronological window resets ("use before reset" opportunities) and threshold alert history.</p>
         </div>
         <div class="usage-controls">
+          <select id="timeline-range" class="control-select" aria-label="Reset timeline range">
+            <option value="all">All upcoming</option>
+            <option value="hour">Next hour</option>
+            <option value="today">Today</option>
+            <option value="week">Next 7 days</option>
+          </select>
           <button id="timeline-alert-settings-btn" class="chip-toggle" type="button" title="Configure Usage Reset Notifications">
             Reset Alerts
           </button>
@@ -596,7 +615,11 @@
       <ol class="omp-steps-list">
         <li>
           <strong>★ Smart Account Router &amp; Burn-Rate Pace</strong>
-          <span>Automatically scores every account by bottleneck headroom and expiring-window urgency ("Use before reset!"), while forecasting whether your burn rate is on-pace or running hot.</span>
+          <span>Choose balanced, capacity, expiry, or pinned-account priority. Open a provider from its account card; use Copy email only when the identity is visible.</span>
+        </li>
+        <li>
+          <strong>Reset ranges &amp; private summaries</strong>
+          <span>Filter upcoming resets by hour, today, or the next seven days. Copy private summary omits account names and emails, even when identities are visible.</span>
         </li>
         <li>
           <strong>Desktop Widget, Mini Button &amp; System Tray Alerts</strong>
@@ -644,10 +667,10 @@
 
         <div class="alert-pref-row">
           <div class="alert-pref-copy">
-            <strong>Banked &amp; Early Promo Resets</strong>
-            <span>Detect banked reset credits (e.g. OpenAI Codex), expiration warnings, and mid-cycle refreshes.</span>
+            <strong>Banked Reset Credits</strong>
+            <span>Notify when Claude or OpenAI Codex reports available banked reset credits, and warn when reported credits are expiring. Providers may not expose this data.</span>
           </div>
-          <button id="pref-banked-alerts" class="switch-btn" type="button" role="switch" aria-checked="true" aria-label="Toggle banked and early reset notifications">
+          <button id="pref-banked-alerts" class="switch-btn" type="button" role="switch" aria-checked="true" aria-label="Toggle banked reset credit notifications">
             <span class="switch-thumb"></span>
           </button>
         </div>

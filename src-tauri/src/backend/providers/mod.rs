@@ -211,9 +211,8 @@ pub async fn fetch_claude_usage(client: &Client, account: &Value) -> Result<Valu
         }
     }
     if limits.is_empty() { return Err("Claude returned no active usage windows for this account.".into()); }
-    let raw = [&data["rate_limit_resets"], &data["limit_reset"], &data["manual_reset"]].into_iter().find(|v| !v.is_null()).unwrap_or(&data);
     let mut report = json!({"fetchedAt": now_ms(), "limits": limits, "metadata": {"email": account["email"], "orgName": account["orgName"], "planType": account["planType"]}});
-    if let Some(banked) = parse_banked_reset_payload(raw, "claude") { report["bankedResets"] = banked; }
+    if let Some(banked) = parse_inline_banked_resets(&data, "claude") { report["bankedResets"] = banked; }
     Ok(report)
 }
 
@@ -241,6 +240,23 @@ fn js_string(value: &Value) -> String {
     }
 }
 
+fn reset_credit_count(value: &Value) -> Option<u64> {
+    value.as_u64().or_else(|| value.as_f64().filter(|n| n.is_finite() && *n >= 0.0 && n.fract() == 0.0 && *n < u64::MAX as f64).map(|n| n as u64))
+}
+
+// Usage responses also contain unrelated credits, items and counts. Only enter
+// the generic credit parser through fields explicitly identifying reset credits.
+fn parse_inline_banked_resets(data: &Value, provider: &str) -> Option<Value> {
+    for key in ["rate_limit_resets", "limit_reset", "manual_reset", "rate_limit_reset_credits",
+        "rateLimitResetCredits", "reset_credits", "banked_resets"] {
+        if let Some(banked) = parse_banked_reset_payload(&data[key], provider) { return Some(banked); }
+    }
+    reset_credit_count(&data["banked_reset_count"]).map(|count| json!({
+        "count": count, "earliestExpiresAt": null,
+        "redeemable": provider == "codex" && count > 0, "items": []
+    }))
+}
+
 /// Parses provider reset credits, excluding consumed, inactive, and expired entries.
 pub fn parse_banked_reset_payload(raw: &Value, provider: &str) -> Option<Value> {
     if !raw.is_object() && !raw.is_array() { return None; }
@@ -252,18 +268,28 @@ pub fn parse_banked_reset_payload(raw: &Value, provider: &str) -> Option<Value> 
         }
     }
     let count = ["available_count", "availableCount", "remaining_resets", "remainingResets", "banked_reset_count"].into_iter()
-        .find_map(|key| numeric(&raw[key]).or_else(|| numeric(&raw["rate_limit_reset_credits"][key])))
-        .map(|n| n.floor().max(0.0) as u64);
+        .find_map(|key| reset_credit_count(&raw[key]).or_else(|| reset_credit_count(&raw["rate_limit_reset_credits"][key])));
     if list.is_none() && count.is_none() { return None; }
     let mut items = Vec::new();
     for entry in list.into_iter().flatten() {
-        if !entry.is_object() { continue; }
+        if !entry.is_object() { return None; }
         if ["consumed_at", "redeemed_at", "used_at"].into_iter().any(|k| js_truthy(&entry[k])) || entry["is_consumed"] == true || entry["redeemed"] == true { continue; }
-        let state = ["status", "state"].into_iter().map(|key| &entry[key]).find(|value| js_truthy(value)).map(js_string).unwrap_or_default().to_lowercase();
+        let state = match ["status", "state"].into_iter().map(|key| &entry[key]).find(|value| !value.is_null()) {
+            Some(value) => value.as_str()?.to_lowercase(),
+            None => String::new(),
+        };
         if ["consumed", "redeemed", "used", "expired", "revoked", "cancelled", "canceled", "inactive"].contains(&state.as_str()) { continue; }
-        let expiry = ["expires_at", "expiration_at", "expire_at", "expiresAt", "valid_until"].into_iter().map(|k| &entry[k]).find(|v| js_truthy(v)).map(iso).unwrap_or(Value::Null);
+        if !state.is_empty() && state != "available" && state != "active" { return None; }
+        let expiry_raw = ["expires_at", "expiration_at", "expire_at", "expiresAt", "valid_until"].into_iter()
+            .map(|k| &entry[k]).find(|v| !v.is_null());
+        let expiry = expiry_raw.map(iso).unwrap_or(Value::Null);
+        if expiry_raw.is_some() && expiry.is_null() { return None; }
         if expiry.as_str().and_then(|s| DateTime::parse_from_rfc3339(s).ok()).map(|d| d.timestamp_millis() <= now_ms()).unwrap_or(false) { continue; }
-        let id = ["id", "credit_id", "creditId"].into_iter().map(|key| &entry[key]).find(|value| js_truthy(value)).map(js_string).unwrap_or_default();
+        let id = match ["id", "credit_id", "creditId"].into_iter().map(|key| &entry[key]).find(|value| !value.is_null()) {
+            Some(value) => value.as_str()?.to_owned(),
+            None => String::new(),
+        };
+        if id.is_empty() && expiry.is_null() && state != "available" && state != "active" { return None; }
         let source = ["source", "grant_reason", "type"].into_iter().map(|key| &entry[key]).find(|value| js_truthy(value)).map(js_string).unwrap_or_else(|| "banked_reset".into());
         items.push(json!({"id": id, "expiresAt": expiry, "source": source}));
     }
@@ -272,6 +298,49 @@ pub fn parse_banked_reset_payload(raw: &Value, provider: &str) -> Option<Value> 
     let earliest = items.iter().find(|v| !v["expiresAt"].is_null()).map(|v| v["expiresAt"].clone()).unwrap_or(Value::Null);
     items.truncate(10);
     Some(json!({"count": total, "earliestExpiresAt": earliest, "redeemable": provider == "codex" && total > 0, "items": items}))
+}
+
+#[cfg(test)]
+mod banked_reset_tests {
+    use super::*;
+
+    #[test]
+    fn inline_requires_explicit_reset_fields() {
+        for provider in ["claude", "codex"] {
+            assert!(parse_inline_banked_resets(&json!({"credits": [{"id": "other"}], "available_count": 3}), provider).is_none());
+            let parsed = parse_inline_banked_resets(&json!({"rate_limit_reset_credits": {"available_count": 2}}), provider).unwrap();
+            assert_eq!(parsed["count"], 2);
+            assert_eq!(parsed["redeemable"], provider == "codex");
+            assert_eq!(parse_inline_banked_resets(&json!({"banked_reset_count": 0}), provider).unwrap()["count"], 0);
+            assert_eq!(parse_inline_banked_resets(&json!({"banked_reset_count": 2.0}), provider).unwrap()["count"], 2);
+            assert_eq!(parse_inline_banked_resets(&json!({"manual_reset": {}, "banked_resets": {"available_count": 1}}), provider).unwrap()["count"], 1);
+        }
+    }
+
+    #[test]
+    fn malformed_credit_payloads_are_unknown() {
+        for raw in [json!({}), json!({"available_count": -1}), json!({"available_count": 1.5}),
+            json!({"credits": [null]}), json!({"credits": [{}]}),
+            json!({"credits": [{"id": {}, "status": "available"}]}),
+            json!({"credits": [{"id": "x", "expires_at": "invalid"}]}),
+            json!({"credits": [{"id": "x", "status": "pending"}]})] {
+            assert!(parse_banked_reset_payload(&raw, "codex").is_none(), "{raw}");
+        }
+        assert_eq!(parse_banked_reset_payload(&json!({"credits": []}), "codex").unwrap()["count"], 0);
+    }
+
+    #[test]
+    fn explicit_list_excludes_consumed_and_expired_credits() {
+        let raw = json!({"credits": [
+            {"id": "active", "expires_at": "2999-01-01T00:00:00Z"},
+            {"id": "used", "status": "redeemed"},
+            {"id": "expired", "expires_at": "2000-01-01T00:00:00Z"}
+        ]});
+        let parsed = parse_banked_reset_payload(&raw, "codex").unwrap();
+        assert_eq!(parsed["count"], 1);
+        assert_eq!(parsed["items"][0]["id"], "active");
+        assert!(parsed["earliestExpiresAt"].is_string());
+    }
 }
 
 /// Fetches xAI Grok CLI credit and billing windows.
@@ -449,21 +518,23 @@ pub fn invalidate_codex_banked_cache(account: &Value) {
 async fn codex_banked_resets(client: &Client, account: &Value, headers: reqwest::header::HeaderMap, inline: Option<Value>, force: bool) -> Option<Value> {
     let key = codex_cache_key(account).to_owned();
     let cached = CODEX_BANKED_CACHE.lock().ok().and_then(|cache| cache.get(&key).cloned());
+    if let Some(value) = inline {
+        if let Ok(mut cache) = CODEX_BANKED_CACHE.lock() { cache.insert(key.clone(), (now_ms(), value.clone())); }
+        return Some(value);
+    }
     if !force {
         if let Some((time, value)) = &cached {
             if now_ms() - time < 600_000 { return Some(value.clone()); }
         }
     }
-    let empty = || json!({"count":0,"earliestExpiresAt":null,"redeemable":false,"items":[]});
     let fresh = match response_json(client.get("https://chatgpt.com/backend-api/wham/rate-limit-reset-credits").headers(headers)).await {
-        Ok((status, data)) if status.is_success() && !data.is_null() => Some(parse_banked_reset_payload(&data, "codex").unwrap_or_else(empty)),
-        Ok((status, _)) if status == StatusCode::NOT_FOUND => Some(inline.clone().unwrap_or_else(empty)),
+        Ok((status, data)) if status.is_success() => parse_banked_reset_payload(&data, "codex"),
         _ => None,
     };
     if let Some(value) = fresh {
         if let Ok(mut cache) = CODEX_BANKED_CACHE.lock() { cache.insert(key, (now_ms(), value.clone())); }
         Some(value)
-    } else { cached.map(|(_, value)| value).or(inline) }
+    } else { None }
 }
 
 /// Fetches Codex usage and cached banked-reset credits. Refresh separately first.
@@ -506,7 +577,7 @@ pub async fn fetch_codex_usage_with_options(client: &Client, account: &mut Value
         limits.push(limit("spend".into(), format!("Spend (${:.2} / ${:.0})", used/100.0, total/100.0), "monthly".into(), json!(MONTH_MS), used/total, iso(&spend["resets_at"])));
     }
     if limits.is_empty() { return Err("Codex returned no active quota windows for this account.".into()); }
-    let inline = parse_banked_reset_payload(&data, "codex");
+    let inline = parse_inline_banked_resets(&data, "codex");
     let banked = codex_banked_resets(client, account, headers, inline, force_banked).await;
     Ok(json!({"fetchedAt":now_ms(), "limits":limits, "bankedResets":banked, "metadata":{"email":account["email"], "accountId":account["accountId"], "planType":account["planType"]}}))
 }

@@ -281,6 +281,8 @@ const state = {
   tagFilter: 'all',
   accountSearch: '',
   accountSort: 'router',
+  routerPriority: 'balanced',
+  timelineRange: 'all',
   showRemaining: false,
   popoverLayout: false,
   maskIdentities: true,
@@ -859,7 +861,7 @@ function formatCompactNumber(value) {
 }
 
 function copyText(text, button, label = 'Copied to clipboard') {
-  if (!navigator.clipboard) return;
+  if (!navigator.clipboard) { showToast('Clipboard unavailable', 'warn'); return; }
   navigator.clipboard.writeText(text).then(() => {
     showToast(label);
     if (button) {
@@ -867,7 +869,7 @@ function copyText(text, button, label = 'Copied to clipboard') {
       button.textContent = 'Copied!';
       setTimeout(() => { button.textContent = previous; }, 1400);
     }
-  }).catch(() => {});
+  }).catch(() => showToast('Could not copy to clipboard', 'warn'));
 }
 
 /* ============================================================================
@@ -940,6 +942,68 @@ function earliestResetLabel(account) {
   const rel = formatRelativeTime(ms);
   return rel && rel.startsWith('in ') ? `Resets ${rel}` : '';
 }
+function hasFreshReport(account, now = Date.now()) {
+  if (!account.enabled || account.status !== 'Reporting' || account.updatedAt == null) return false;
+  const updated = new Date(account.updatedAt).getTime();
+  return Number.isFinite(updated) && updated <= now && now - updated <= 15 * 60_000;
+}
+
+function hasCurrentWindow(limit, now = Date.now()) {
+  if (!Number.isFinite(limit.usedFraction) || limit.usedFraction < 0 || limit.usedFraction > 1) return false;
+  if (limit.resetsAt == null || limit.resetsAt === '') return true;
+  const reset = new Date(limit.resetsAt).getTime();
+  return Number.isFinite(reset) && reset > now;
+}
+
+function routerEligible(account, now = Date.now()) {
+  if (!hasFreshReport(account, now) || !Number.isFinite(account.routerScore)) return false;
+  const measured = orderedLimits(account).filter(limit => Number.isFinite(limit.usedFraction));
+  return measured.length > 0 && measured.every(limit => hasCurrentWindow(limit, now));
+}
+
+
+function routerRecommendations() {
+  const groups = new Map();
+  for (const account of state.accounts) {
+    if (!routerEligible(account)) continue;
+    const key = providerKey(account);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(account);
+  }
+  return [...groups.values()].map(group => {
+    const priority = state.routerPriority;
+    const expiry = account => {
+      const times = orderedLimits(account).filter(l => Number.isFinite(l.usedFraction) && l.usedFraction <= 0.82)
+        .map(l => new Date(l.resetsAt).getTime()).filter(t => Number.isFinite(t) && t > Date.now());
+      return times.length ? Math.min(...times) : Infinity;
+    };
+    group.sort((a, b) => {
+      if (priority === 'capacity') {
+        const diff = (bottleneckFreeFraction(b) ?? -1) - (bottleneckFreeFraction(a) ?? -1);
+        if (diff) return diff;
+      } else if (priority === 'expiry') {
+        const at = expiry(a), bt = expiry(b);
+        if (at !== bt) return at - bt;
+      } else if (priority === 'preferred' && Boolean(a.pinned) !== Boolean(b.pinned)) {
+        return a.pinned ? -1 : 1;
+      }
+      return b.routerScore - a.routerScore;
+    });
+    const account = group[0];
+    const free = bottleneckFreeFraction(account);
+    const capacity = free === null ? 'Capacity unavailable' : `${Math.round(free * 100)}% bottleneck free`;
+    let reason = account.recommendReason || `${capacity}; balanced score ${account.routerScore}`;
+    if (priority === 'capacity') reason = `${capacity}; highest bottleneck capacity (balanced score breaks ties)`;
+    if (priority === 'expiry') reason = expiry(account) < Infinity
+      ? `Resets ${formatRelativeTime(expiry(account))}; window has at least 18% free (balanced score breaks ties)`
+      : 'No eligible window with a future reset; using balanced score';
+    if (priority === 'preferred') reason = account.pinned
+      ? `Pinned preferred account; ${capacity} (balanced score breaks ties)`
+      : `No eligible pinned account; using balanced score · ${capacity}`;
+    if (free !== null && free <= 0.015 && account.bankedResets?.count > 0) reason += ' · quota full; redeem a banked reset first';
+    return { provider: account.provider, accountId: account.id, label: accountLabel(account), score: account.routerScore, reason, totalCandidates: group.length };
+  });
+}
 
 function buildPaceBadge(limit) {
   const p = limit?.pace;
@@ -993,7 +1057,8 @@ function createCompactPillMetric(tagText, limit) {
 
 function bestDefaultAccountForGroup(group) {
   if (!group.length) return null;
-  const recommended = group.find(a => a.recommended);
+  const recommendedIds = new Set(routerRecommendations().map(r => r.accountId));
+  const recommended = group.find(a => recommendedIds.has(a.id));
   if (recommended) return recommended;
   const score = acc => {
     const reporting = String(acc.status || '').toLowerCase() === 'reporting' ? 100 : 0;
@@ -1190,7 +1255,7 @@ function buildWidgetDetailPane(account) {
     createProviderLogo(account, 'widget-logo sm'),
     node('span', 'widget-detail-title', label)
   );
-  if (account.recommended) {
+  if (routerRecommendations().some(rec => rec.accountId === account.id)) {
     titleRow.append(node('span', 'best-badge', '★ Best'));
   }
   const relUpdated = formatRelativeTime(account.updatedAt || state.lastSyncedAt);
@@ -1249,7 +1314,7 @@ function buildWidgetDetailPane(account) {
         : (candidate.status === 'Paused' ? 'Off' : '—');
       const pctSpan = node('span', 'widget-account-pill-pct', shownPct);
       pctSpan.dataset.severity = sev;
-      const chipLabel = `${candidate.recommended ? '★ ' : ''}${shortAccountChipName(candidate, idx)}`;
+      const chipLabel = `${routerRecommendations().some(rec => rec.accountId === candidate.id) ? '★ ' : ''}${shortAccountChipName(candidate, idx)}`;
       pill.append(node('span', '', chipLabel), pctSpan);
       pill.title = `${accountLabel(candidate)} (${shownPct})`;
       pill.addEventListener('click', () => {
@@ -1421,15 +1486,15 @@ function renderSmartRouter() {
   const bar = $('smart-router-bar');
   if (!section || !bar) return;
 
-  const recs = Array.isArray(state.recommendations) ? state.recommendations : [];
-  if (!recs.length) {
-    section.hidden = true;
-    bar.replaceChildren();
-    return;
-  }
+  const recs = routerRecommendations();
+  section.hidden = !state.accounts.length;
+  if (!state.accounts.length) { bar.replaceChildren(); return; }
 
   section.hidden = false;
   bar.replaceChildren();
+  if (!recs.length) bar.append(node('p', 'data-message router-notice', 'No eligible accounts: reports must be recent and known reset times must not have passed. Refresh accounts to update recommendations.'));
+  const recommendedProviders = new Set(recs.map(rec => providerKey(rec.provider)));
+  const unavailableProviders = new Set(state.accounts.map(account => providerKey(account)).filter(key => !recommendedProviders.has(key)));
 
   for (const rec of recs) {
     const info = providerInfo(rec.provider);
@@ -1462,6 +1527,9 @@ function renderSmartRouter() {
     });
 
     bar.append(card);
+  }
+  if (recs.length) for (const key of unavailableProviders) {
+    bar.append(node('p', 'data-message router-notice', `${providerInfo(key).name}: no eligible account with a recent report and unexpired known reset times.`));
   }
 }
 
@@ -1551,7 +1619,8 @@ function renderAccount(account) {
   const info = providerInfo(account);
   const label = accountLabel(account);
   const classes = ['account-card'];
-  if (account.recommended) classes.push('recommended-card');
+  const recommended = routerRecommendations().some(rec => rec.accountId === account.id);
+  if (recommended) classes.push('recommended-card');
   if (!account.enabled) classes.push('paused-card');
   const card = node('article', classes.join(' '));
   card.id = `acc-card-${account.id}`;
@@ -1564,7 +1633,7 @@ function renderAccount(account) {
 
   const titleRow = node('div', 'title-badges-row');
   titleRow.append(node('h3', '', label));
-  if (account.recommended) titleRow.append(node('span', 'best-badge', '★ Best Now'));
+  if (recommended) titleRow.append(node('span', 'best-badge', '★ Best Now'));
   if (account.bankedResets?.count > 0) {
     const bc = account.bankedResets.count;
     titleRow.append(node('span', `banked-badge${account.bankedResets.expiringSoon ? ' expiring' : ''}`, `${bc} Banked`));
@@ -1638,6 +1707,29 @@ function renderAccount(account) {
   pinBtn.type = 'button';
   pinBtn.addEventListener('click', () => patchAccountMeta(account.id, { pinned: !account.pinned }));
   actions.append(pinBtn);
+  const handoffUrls = {
+    antigravity: 'https://antigravity.google/', codex: 'https://chatgpt.com/',
+    claude: 'https://claude.ai/', cursor: 'https://cursor.com/',
+    'gemini-cli': 'https://gemini.google.com/', copilot: 'https://github.com/copilot',
+    kimi: 'https://www.kimi.com/', xai: 'https://grok.com/',
+    zai: 'https://z.ai/', minimax: 'https://platform.minimax.io/'
+  };
+  const handoffUrl = Object.hasOwn(handoffUrls, providerKey(account)) ? handoffUrls[providerKey(account)] : null;
+  if (handoffUrl) {
+    const link = node('a', 'text-button', `Open ${info.name}`);
+    link.href = handoffUrl;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.title = 'Open provider; sign in or select the account there';
+    actions.append(link);
+  }
+  if (account.email && identityIsVisible(account)) {
+    const copyIdentity = node('button', 'text-button', 'Copy email');
+    copyIdentity.type = 'button';
+    copyIdentity.title = 'Copy this visible account email for sign-in';
+    copyIdentity.addEventListener('click', () => copyText(account.email, copyIdentity, 'Account email copied'));
+    actions.append(copyIdentity);
+  }
 
   if (account.error || account.status === 'Unavailable' || account.status === 'Stale') {
     const reauthBtn = node('button', 'text-button', 'Re-auth');
@@ -1823,6 +1915,7 @@ function collectUpcomingResets() {
         freePct: used !== null ? Math.round((1 - used) * 100) : null,
         resetsAt: lim.resetsAt,
         resetMs: ms,
+        fresh: hasFreshReport(acc, now),
         pace: lim.pace || null,
         limit: lim
       });
@@ -1840,7 +1933,13 @@ function renderTimeline() {
   schedEl.replaceChildren();
   eventsEl.replaceChildren();
 
-  const upcoming = collectUpcomingResets();
+  const now = Date.now();
+  const endOfToday = new Date(now);
+  endOfToday.setHours(24, 0, 0, 0);
+  const cutoff = state.timelineRange === 'hour' ? now + 60 * 60_000
+    : state.timelineRange === 'today' ? endOfToday.getTime()
+    : state.timelineRange === 'week' ? now + 7 * 24 * 60 * 60_000 : Infinity;
+  const upcoming = collectUpcomingResets().filter(item => item.resetMs < cutoff);
   const schedHead = node('div', 'analytics-chart-wrap');
   const hTitle = node('div', 'analytics-chart-header');
   hTitle.append(
@@ -1851,19 +1950,21 @@ function renderTimeline() {
   schedEl.append(schedHead);
 
   if (!upcoming.length) {
-    schedEl.append(node('p', 'data-message', 'No upcoming reset timestamps reported yet.'));
+    schedEl.append(node('p', 'data-message', state.timelineRange === 'all'
+      ? 'No upcoming reset timestamps reported yet.'
+      : 'No resets in this range. Choose a wider range to see more.'));
   } else {
     schedEl.append(dataTable(
       ['Resets In', 'Exact Reset Time', 'Provider', 'Account', 'Window', 'Unused Capacity', 'Action Hint'],
       upcoming.map(u => {
-        const hint = buildPaceBadge(u.limit) || node('span', 'pace-badge', u.freePct !== null && u.freePct >= 50 ? 'Plenty free' : 'Normal');
+        const hint = u.fresh ? (buildPaceBadge(u.limit) || node('span', 'pace-badge', u.freePct !== null && u.freePct >= 50 ? 'Plenty free' : 'Normal')) : node('span', 'pace-badge', 'Cached data');
         return [
           formatRelativeTime(u.resetMs) || '—',
           formatDate(u.resetsAt) || '—',
           u.provider,
           u.accountLabel,
           u.windowLabel,
-          u.freePct !== null ? `${u.freePct}% free` : '—',
+          u.freePct !== null ? `${u.freePct}% free${u.fresh ? '' : ' (cached)'}` : '—',
           hint
         ];
       }),
@@ -1961,7 +2062,8 @@ function renderVault() {
 
   for (const account of state.accounts) {
     const info = providerInfo(account);
-    const card = node('article', `account-card${account.recommended ? ' recommended-card' : ''}`);
+    const recommended = routerRecommendations().some(rec => rec.accountId === account.id);
+    const card = node('article', `account-card${recommended ? ' recommended-card' : ''}`);
     card.dataset.provider = providerKey(account);
 
     const header = node('div', 'card-header');
@@ -1970,7 +2072,7 @@ function renderVault() {
     const names = node('div', 'identity-text');
     const titleRow = node('div', 'title-badges-row');
     titleRow.append(node('h3', '', accountLabel(account)));
-    if (account.recommended) titleRow.append(node('span', 'best-badge', '★ Best Now'));
+    if (recommended) titleRow.append(node('span', 'best-badge', '★ Best Now'));
     if (account.pinned) titleRow.append(node('span', 'pin-badge', 'Pinned'));
     if (account.tag) titleRow.append(node('span', 'tag-badge', account.tag));
     names.append(titleRow, node('p', 'identity-sub', `${info.name} · ${account.authType === 'api_key' ? 'API Key / Token' : 'OAuth Session'}`));
@@ -2438,9 +2540,10 @@ function filteredAccounts() {
   });
 
   if (state.accountSort === 'router') {
+    const recommendedIds = new Set(routerRecommendations().map(r => r.accountId));
     list.sort((a, b) => {
-      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-      if (a.recommended !== b.recommended) return a.recommended ? -1 : 1;
+      const ar = recommendedIds.has(a.id), br = recommendedIds.has(b.id);
+      if (ar !== br) return ar ? -1 : 1;
       return (b.routerScore ?? -1) - (a.routerScore ?? -1);
     });
   } else if (state.accountSort === 'headroom-desc') {
@@ -2528,7 +2631,7 @@ function updateKpis() {
   const rSub = $('kpi-router-sub');
   const rMeter = $('kpi-router-meter');
   if (rVal && rPill && rSub) {
-    const recs = state.recommendations || [];
+    const recs = routerRecommendations();
     if (!recs.length) {
       rVal.textContent = '—';
       rPill.textContent = 'Standby';
@@ -2634,7 +2737,10 @@ window.addEventListener('focus', refreshConnectivity);
 setInterval(refreshConnectivity, 15000);
 refreshConnectivity();
 
+let routerEligibilitySignature = '';
+
 function render() {
+  routerEligibilitySignature = JSON.stringify(state.accounts.filter(account => routerEligible(account)).map(account => account.id));
   renderDynamicProviderChips();
   renderSmartRouter();
 
@@ -3388,6 +3494,47 @@ document.querySelectorAll('.kpi-card[data-target-tab]').forEach(card => {
 });
 
 // Usage toolbar
+$('router-priority')?.addEventListener('change', e => {
+  state.routerPriority = e.target.value;
+  render();
+});
+$('timeline-range')?.addEventListener('change', e => {
+  state.timelineRange = e.target.value;
+  renderTimeline();
+});
+$('copy-share-summary')?.addEventListener('click', e => {
+  if (!state.loaded) { showToast('Account data is not available yet', 'warn'); return; }
+  const counts = new Map();
+  const now = Date.now();
+  for (const account of state.accounts) {
+    const key = providerKey(account);
+    const provider = DEFAULT_PROVIDERS.find(p => p.id === key);
+    const name = provider ? provider.name : 'Other provider';
+    const entry = counts.get(name) || { accounts: 0, fresh: 0, omitted: 0, used: [] };
+    entry.accounts++;
+    const limits = orderedLimits(account);
+    if (hasFreshReport(account, now)) {
+      entry.fresh++;
+      for (const limit of limits) {
+        if (hasCurrentWindow(limit, now)) entry.used.push(limit.usedFraction);
+        else entry.omitted++;
+      }
+      if (!limits.length) entry.omitted++;
+    } else {
+      entry.omitted += Math.max(1, limits.length);
+    }
+    counts.set(name, entry);
+  }
+  const lines = ['ChalzTracker summary (account names, emails and window labels omitted)'];
+  if (!counts.size) lines.push('No connected accounts.');
+  for (const [name, entry] of counts) {
+    const meanUsed = entry.used.length ? Math.round(entry.used.reduce((sum, used) => sum + used, 0) / entry.used.length * 100) : null;
+    const stats = meanUsed === null ? 'quota usage unavailable'
+      : `mean ${meanUsed}% used / ${100 - meanUsed}% free across ${entry.used.length} current window(s), equally weighted`;
+    lines.push(`${name}: ${entry.accounts} account(s), ${entry.fresh} with recent reports; ${stats}. ${entry.omitted} stale or unavailable window(s)/report(s) omitted.`);
+  }
+  copyText(lines.join('\n'), e.currentTarget, 'Private summary copied');
+});
 $('account-search')?.addEventListener('input', e => {
   state.accountSearch = e.target.value;
   render();
@@ -3599,6 +3746,8 @@ $('toggle-poll')?.addEventListener('click', () => {
 });
 
 setInterval(() => {
+  const currentEligibility = JSON.stringify(state.accounts.filter(account => routerEligible(account)).map(account => account.id));
+  if (currentEligibility !== routerEligibilitySignature) render();
   updateSyncStatus();
   if (state.pollPaused) return;
   state.pollSecondsLeft--;

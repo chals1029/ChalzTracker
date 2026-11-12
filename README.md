@@ -11,10 +11,12 @@ ChalzTracker is an open-source Windows desktop app for monitoring AI subscriptio
 ## Features
 
 - **Multi-account monitoring:** Connect multiple accounts and view usage, remaining quota, and reset times in the Usage tab.
-- **Smart Account Router:** Compare accounts by available headroom and reset timing to help choose which one to use.
-- **Analytics and reset timeline:** Review usage history, burn-rate forecasts, and upcoming resets.
+- **Smart Account Router:** Choose balanced, capacity, soonest eligible reset, or pinned-account priority and see why an account was recommended. Providers without an eligible account appear below the recommendations. Open the provider from an account card or copy an email after revealing it.
+- **Analytics and reset timeline:** Review local usage history and filter upcoming resets to the next hour, today, or seven days.
+- **Private usage summary:** Copy a shareable summary without account names or email addresses.
 - **Compact desktop modes:** Switch to a widget with provider details or a draggable, always-on-top mini button. During the app session, switching providers restores each provider's manually selected account, including in the inline dashboard view. Providers without a manual selection use the best available account.
-- **Notifications and system tray:** Receive configurable usage and reset alerts, such as “5-Hour usage is at 84% used.” Closing the desktop window hides it to the tray.
+- **Notifications and system tray:** Receive configurable usage and reset alerts, including banked reset credits when Claude or OpenAI Codex reports them. Credit availability depends on the provider; unknown data is not treated as zero. The tray menu shows an anonymous balanced recommendation, remaining quota, and next reset when fresh data is available. Closing the desktop window hides it to the tray.
+- **Startup reveal:** A brief logo animation plays when the app starts in dashboard mode. It is skipped when reduced motion is enabled.
 - **Appearance themes:** **AMOLED is the default.** Open **Customize > Theme** to choose **AMOLED** (pure black, retaining your chosen accent), **Website**, **Midnight** (navy and icy blue), **Graphite** (charcoal and silver), **Paper** (light surfaces and dark text), or **Warm dusk** (warm charcoal and amber). Lower opacity for a translucent backdrop without a separate glass theme. Themes apply to the dashboard, compact widget, and mini button; header buttons stay together at desktop widths and wrap in narrow windows. Saved Liquid glass selections migrate to AMOLED without changing other preferences. Customize the accent, layout, background picture, opacity, and notification sounds; preferences are saved locally.
 - **Account privacy:** Emails are hidden by default. Reveal or hide them per account or across the Usage tab and Account Vault.
 - **Account Vault:** Rename, tag, pin, pause, and manage connected accounts. Account data and settings are stored locally in `~/.chalztracker`.

@@ -209,3 +209,73 @@ fn history_load_and_new_records_keep_the_most_recent_limits() {
     assert_eq!(reopened.events.len(), 500);
     assert_eq!(reopened.events.last().unwrap()["type"], "custom");
 }
+
+fn banked_report(count: Value) -> Value {
+    json!({"limits": [], "bankedResets": {"count": count, "earliestExpiresAt": null, "redeemable": true}})
+}
+
+#[test]
+fn banked_credits_alert_only_on_explicit_positive_observations_and_increases() {
+    for provider in ["claude", "codex"] {
+        let dir = TempDir::new().unwrap();
+        write_json(&dir, "accounts.json", &json!({"accounts": [{"id": "a", "provider": provider, "label": "Fixture"}]}));
+        let mut vault = ChalzVault::new(dir.path().to_owned()).unwrap();
+        assert!(vault.record_account_usage("a", Some(&json!({"limits": []})), None).unwrap().is_empty());
+        assert!(vault.record_account_usage("a", Some(&banked_report(Value::Null)), None).unwrap().is_empty());
+        let initial = vault.record_account_usage("a", Some(&banked_report(json!(2))), None).unwrap();
+        assert_eq!(initial.len(), 1);
+        assert_eq!(initial[0]["kind"], "banked_grant");
+        assert!(initial[0]["body"].as_str().unwrap().contains("2 banked reset credit"));
+        assert!(!initial[0]["body"].as_str().unwrap().contains('+'));
+        assert!(!vault.events[0]["detail"].as_str().unwrap().contains("Received"));
+        assert!(vault.record_account_usage("a", Some(&banked_report(json!(2))), None).unwrap().is_empty());
+        assert!(vault.record_account_usage("a", Some(&json!({"limits": [], "bankedResets": null})), None).unwrap().is_empty());
+        assert!(vault.record_account_usage("a", Some(&banked_report(Value::Null)), None).unwrap().is_empty());
+        let mut reopened = ChalzVault::new(dir.path().to_owned()).unwrap();
+        assert!(reopened.record_account_usage("a", Some(&banked_report(json!(2))), None).unwrap().is_empty());
+        let increase = reopened.record_account_usage("a", Some(&banked_report(json!(4))), None).unwrap();
+        assert_eq!(increase.len(), 1);
+        assert!(increase[0]["body"].as_str().unwrap().contains("+2"));
+        assert_eq!(reopened.events.iter().filter(|e| e["type"] == "banked_grant").count(), 2);
+        assert!(reopened.record_account_usage("a", Some(&banked_report(json!(0))), None).unwrap().is_empty());
+        let after_zero = reopened.record_account_usage("a", Some(&banked_report(json!(1))), None).unwrap();
+        assert!(after_zero[0]["body"].as_str().unwrap().contains("+1"));
+    }
+}
+
+#[test]
+fn banked_alert_preferences_suppress_notifications_without_replaying() {
+    let dir = TempDir::new().unwrap();
+    write_json(&dir, "accounts.json", &json!({"accounts": [{"id": "a", "provider": "codex", "label": "Fixture"}]}));
+    let mut vault = ChalzVault::new(dir.path().to_owned()).unwrap();
+    vault.update_settings(&json!({"bankedAlertsEnabled": false})).unwrap();
+    assert!(vault.record_account_usage("a", Some(&banked_report(json!(1))), None).unwrap().is_empty());
+    vault.update_settings(&json!({"bankedAlertsEnabled": true})).unwrap();
+    assert!(vault.record_account_usage("a", Some(&banked_report(json!(1))), None).unwrap().is_empty());
+    vault.update_settings(&json!({"alertsEnabled": false})).unwrap();
+    assert!(vault.record_account_usage("a", Some(&banked_report(json!(2))), None).unwrap().is_empty());
+    vault.update_settings(&json!({"alertsEnabled": true})).unwrap();
+    let mut reopened = ChalzVault::new(dir.path().to_owned()).unwrap();
+    assert!(reopened.record_account_usage("a", Some(&banked_report(json!(2))), None).unwrap().is_empty());
+    assert_eq!(reopened.record_account_usage("a", Some(&banked_report(json!(3))), None).unwrap()[0]["kind"], "banked_grant");
+}
+
+#[test]
+fn other_providers_and_early_quota_drops_do_not_imply_banked_grants() {
+    let dir = TempDir::new().unwrap();
+    write_json(&dir, "accounts.json", &json!({"accounts": [
+        {"id": "a", "provider": "claude", "label": "Claude"},
+        {"id": "b", "provider": "antigravity", "label": "Other"}
+    ]}));
+    let mut vault = ChalzVault::new(dir.path().to_owned()).unwrap();
+    assert!(vault.record_account_usage("b", Some(&banked_report(json!(3))), None).unwrap().is_empty());
+    assert!(vault.record_account_usage("a", Some(&banked_report(json!(0))), None).unwrap().is_empty());
+    let high = json!({"limits": [{"id": "weekly", "label": "Weekly", "usedFraction": 0.6, "resetsAt": 4102444800000_i64}]});
+    let low = json!({"limits": [{"id": "weekly", "label": "Weekly", "usedFraction": 0.1, "resetsAt": 4102444800000_i64}]});
+    assert!(vault.record_account_usage("a", Some(&high), None).unwrap().is_empty());
+    let alerts = vault.record_account_usage("a", Some(&low), None).unwrap();
+    assert_eq!(alerts.len(), 1);
+    assert_eq!(alerts[0]["kind"], "reset");
+    assert!(!alerts[0]["title"].as_str().unwrap().to_lowercase().contains("banked"));
+    assert!(!vault.events.iter().any(|e| e["type"] == "banked_grant" || e["type"] == "banked_reset"));
+}

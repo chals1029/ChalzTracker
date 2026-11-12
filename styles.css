@@ -3,6 +3,41 @@
    Restrained, anti-AI-slop precision inspired by macOS Menu Bar, Win11 & Linear
    ========================================================================== */
 
+/* Brief, non-interactive logo reveal; the app continues loading underneath. */
+.startup-reveal {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  animation: startup-reveal 1.4s ease both;
+}
+.startup-reveal-brand {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  animation: startup-brand 1.1s cubic-bezier(.22, 1, .36, 1) both;
+}
+@keyframes startup-reveal {
+  0%, 70% { opacity: 1; visibility: visible; }
+  100% { opacity: 0; visibility: hidden; }
+}
+@keyframes startup-brand {
+  from { opacity: 0; transform: translateY(8px) scale(.94); }
+  45%, 100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+body[data-view-mode="widget"] .startup-reveal,
+body[data-view-mode="pill"] .startup-reveal { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .startup-reveal { display: none; }
+}
+
 :root,
 [data-theme="dark"] {
   color-scheme: dark;
@@ -1767,6 +1802,11 @@ h1,
   align-items: center;
   gap: 8px;
 }
+.card-actions {
+  flex-wrap: wrap;
+}
+
+
 
 .button {
   display: inline-flex;
@@ -3309,6 +3349,7 @@ dialog code {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 11px;
 }
@@ -3333,8 +3374,16 @@ dialog code {
 
 .smart-router-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(268px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 268px), 1fr));
   gap: 10px;
+}
+
+.router-notice {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 2px 0;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .router-card {
@@ -3380,9 +3429,8 @@ dialog code {
   margin-top: 3px;
   font-size: 11.5px;
   color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 /* Account Card Best / Tag / Pin / Pace Badges */

@@ -346,12 +346,73 @@ pub fn show_notification(app: &tauri::AppHandle, title: &str, body: &str) -> Res
     app.notification().builder().title(title).body(body).show().map_err(|e| e.to_string())
 }
 
+// Only values derived from the provider catalog and numeric quota data reach the menu.
+// Account labels, IDs, emails, error messages and credentials never do.
+fn tray_summary(accounts: &[Value]) -> (String, String, String) {
+    let now = chrono::Utc::now().timestamp_millis();
+    let timestamp = |v: &Value| {
+        v.as_i64().or_else(|| v.as_str().and_then(|s|
+            chrono::DateTime::parse_from_rfc3339(s).ok().map(|d| d.timestamp_millis())))
+    };
+    let fresh = |account: &Value| {
+        account["status"].as_str() == Some("Reporting")
+            && timestamp(&account["updatedAt"]).is_some_and(|t| t <= now && now - t <= 300_000)
+            && !account["limits"].as_array().into_iter().flatten()
+                .filter_map(|limit| timestamp(&limit["resetsAt"])).any(|reset| reset <= now)
+    };
+    let account = accounts.iter().find(|a| a["recommended"].as_bool() == Some(true) && fresh(a));
+    let Some(account) = account else {
+        let stale = accounts.iter().any(|a| a["status"].as_str() == Some("Stale")
+            || (a["status"].as_str() == Some("Reporting") && !fresh(a)));
+        return (if stale { "Balanced recommendation unavailable — data stale" } else { "No balanced recommendation available" }.into(),
+            "Quota unavailable".into(), "Reset unavailable".into());
+    };
+    let provider_id = account["provider"].as_str().unwrap_or("");
+    static PROVIDERS: std::sync::LazyLock<Value> = std::sync::LazyLock::new(||
+        serde_json::from_str(include_str!("backend/provider_catalog.json")).expect("embedded provider catalog"));
+    let provider = PROVIDERS.as_array().and_then(|providers| providers.iter()
+        .find(|p| p["id"].as_str() == Some(provider_id)))
+        .and_then(|p| p["name"].as_str()).unwrap_or("Provider");
+    let ordinal = accounts.iter().take_while(|a| !std::ptr::eq(*a, account))
+        .filter(|a| a["provider"].as_str() == Some(provider_id)).count() + 1;
+    let limits = account["limits"].as_array();
+    let used = limits.into_iter().flatten().filter_map(|l| l["usedFraction"].as_f64())
+        .filter(|n| n.is_finite()).map(|n| n.clamp(0.0, 1.0)).reduce(f64::max);
+    let quota = used.map(|u| format!("Remaining: {:.0}% (most used window)", (1.0 - u) * 100.0))
+        .unwrap_or_else(|| "Quota unavailable".into());
+    let reset = limits.into_iter().flatten().filter_map(|l| timestamp(&l["resetsAt"]))
+        .filter(|t| *t > now).min()
+        .and_then(chrono::DateTime::from_timestamp_millis)
+        .map(|d| format!("Next reset: {}", d.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M")))
+        .unwrap_or_else(|| "Next reset unavailable".into());
+    (format!("Balanced recommendation: {provider} — Account {ordinal}"), quota, reset)
+}
+
+fn start_tray_quick_view(app: &tauri::AppHandle, recommendation: MenuItem<tauri::Wry>, quota: MenuItem<tauri::Wry>, reset: MenuItem<tauri::Wry>) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            let snapshot = app.try_state::<Mutex<crate::backend::BackendHandle>>()
+                .and_then(|backend| backend.lock().ok().map(|backend| backend.account_snapshot()));
+            let (title, remaining, next_reset) = snapshot.as_ref().map(|accounts| tray_summary(accounts)).unwrap_or_else(||
+                ("Balanced recommendation unavailable".into(), "Quota unavailable".into(), "Reset unavailable".into()));
+            if let Err(error) = recommendation.set_text(title) { eprintln!("Tray recommendation: {error}"); }
+            if let Err(error) = quota.set_text(remaining) { eprintln!("Tray quota: {error}"); }
+            if let Err(error) = reset.set_text(next_reset) { eprintln!("Tray reset: {error}"); }
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        }
+    });
+}
+
 pub fn create_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+    let recommendation = MenuItem::with_id(app, "quick-recommendation", "Balanced recommendation unavailable", false, None::<&str>)?;
+    let quota = MenuItem::with_id(app, "quick-quota", "Quota unavailable", false, None::<&str>)?;
+    let reset = MenuItem::with_id(app, "quick-reset", "Reset unavailable", false, None::<&str>)?;
     let dashboard = MenuItem::with_id(app, "dashboard", "Open Dashboard", true, None::<&str>)?;
     let widget = MenuItem::with_id(app, "widget", "Compact Widget (W)", true, None::<&str>)?;
     let pill = MenuItem::with_id(app, "pill", "Mini Pill (M)", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit ChalzTracker", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&dashboard, &widget, &pill, &quit])?;
+    let menu = Menu::with_items(app, &[&recommendation, &quota, &reset, &dashboard, &widget, &pill, &quit])?;
     let icon = app.default_window_icon().ok_or_else(|| tauri::Error::AssetNotFound("tray icon".into()))?.clone();
     TrayIconBuilder::with_id("main-tray").icon(icon).tooltip("ChalzTracker — Your Personal AI Usage Tracker")
         .menu(&menu).show_menu_on_left_click(false)
@@ -383,5 +444,43 @@ pub fn create_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                 }
             }
         }).build(app)?;
+    start_tray_quick_view(app, recommendation, quota, reset);
     Ok(())
+}
+
+#[cfg(test)]
+mod tray_tests {
+    use super::tray_summary;
+    use serde_json::json;
+
+    #[test]
+    fn quick_view_reports_fresh_quota_without_identity() {
+        let now = chrono::Utc::now().timestamp_millis();
+        let accounts = vec![json!({
+            "provider": "codex", "recommended": true, "status": "Reporting",
+            "updatedAt": now, "email": "private@example.invalid", "label": "Private label",
+            "limits": [{"usedFraction": 0.4, "resetsAt": now + 3_600_000}]
+        })];
+        let (title, quota, reset) = tray_summary(&accounts);
+        assert!(title.contains("Codex"));
+        assert_eq!(quota, "Remaining: 60% (most used window)");
+        assert!(reset.starts_with("Next reset: "));
+        let combined = format!("{title} {quota} {reset}");
+        assert!(!combined.contains("private@example.invalid"));
+        assert!(!combined.contains("Private label"));
+    }
+
+    #[test]
+    fn quick_view_does_not_report_old_or_expired_usage_as_current() {
+        let now = chrono::Utc::now().timestamp_millis();
+        for (updated, reset) in [(now - 600_000, now + 3_600_000), (now, now - 1_000)] {
+            let accounts = vec![json!({
+                "provider": "codex", "recommended": true, "status": "Reporting", "updatedAt": updated,
+                "limits": [{"usedFraction": 0.4, "resetsAt": reset}]
+            })];
+            let (title, quota, _) = tray_summary(&accounts);
+            assert!(title.contains("stale"));
+            assert_eq!(quota, "Quota unavailable");
+        }
+    }
 }
