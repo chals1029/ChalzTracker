@@ -1,6 +1,6 @@
 [package]
 name = "chalztracker"
-version = "2.2.10"
+version = "2.2.11"
 edition = "2021"
 
 [features]

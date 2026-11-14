@@ -3376,6 +3376,10 @@ dialog code {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 268px), 1fr));
   gap: 10px;
+  height: 80px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 
 .router-notice {
@@ -3390,6 +3394,7 @@ dialog code {
   display: flex;
   align-items: center;
   gap: 11px;
+  min-height: 80px;
   padding: 11px 13px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-subtle);
@@ -3425,12 +3430,15 @@ dialog code {
 }
 
 .router-card-reason {
-  display: block;
+  display: -webkit-box;
   margin-top: 3px;
   font-size: 11.5px;
   color: var(--text-secondary);
   line-height: 1.4;
   overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
 /* Account Card Best / Tag / Pin / Pace Badges */
