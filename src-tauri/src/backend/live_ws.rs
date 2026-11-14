@@ -11,10 +11,10 @@ use futures_util::{
     SinkExt, StreamExt,
 };
 use serde_json::Value;
-use std::{sync::Once, time::Duration};
-use tokio::{net::TcpStream, time::timeout};
+use std::{net::SocketAddr, sync::Once, time::Duration};
+use tokio::{net::{lookup_host, TcpStream}, time::timeout};
 use tokio_tungstenite::{
-    connect_async_tls_with_config,
+    client_async_tls_with_config,
     tungstenite::{
         client::IntoClientRequest,
         error::Error as WsError,
@@ -27,6 +27,7 @@ use url::{Host, Url};
 const MAX_INBOUND_MESSAGE_BYTES: usize = 64 * 1024;
 const MAX_OUTBOUND_TEXT_BYTES: usize = 270 * 1024;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
+const ADDRESS_TIMEOUT: Duration = Duration::from_secs(3);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 
 static INIT_RUSTLS: Once = Once::new();
@@ -88,16 +89,29 @@ pub async fn connect_ws(ws_url: &str, allow_local_http: bool, host_token: &str) 
         .max_message_size(Some(MAX_INBOUND_MESSAGE_BYTES))
         .max_frame_size(Some(MAX_INBOUND_MESSAGE_BYTES));
 
-    let mut request = ws_url.into_client_request().map_err(|_| "Invalid WebSocket request.".to_owned())?;
-    let authorization = format!("Bearer {host_token}").parse().map_err(|_| "Invalid host authorization.".to_owned())?;
-    request.headers_mut().insert("Authorization", authorization);
-    let (ws_stream, _) = timeout(
-        CONNECT_TIMEOUT,
-        connect_async_tls_with_config(request, Some(config), true, connector),
-    )
-    .await
-    .map_err(|_| "Relay connection timed out.".to_owned())?
-    .map_err(sanitize_ws_connect_error)?;
+    let port = parsed.port_or_known_default().ok_or("WebSocket URL is missing a port.")?;
+    let host = parsed.host_str().ok_or("WebSocket URL is missing a host.")?.trim_start_matches('[').trim_end_matches(']');
+    let (ws_stream, _) = timeout(CONNECT_TIMEOUT, async {
+        let addresses = lookup_host((host, port)).await
+            .map_err(|err| format!("Relay address lookup failed ({}).", err.kind()))?;
+        let mut v4 = Vec::new();
+        let mut v6 = Vec::new();
+        let mut first_is_v6 = false;
+        for address in addresses {
+            if v4.is_empty() && v6.is_empty() { first_is_v6 = address.is_ipv6(); }
+            if address.is_ipv6() { v6.push(address); } else { v4.push(address); }
+        }
+        let mut ordered = Vec::with_capacity(v4.len() + v6.len());
+        let mut v4 = v4.into_iter();
+        let mut v6 = v6.into_iter();
+        loop {
+            let (first, second) = if first_is_v6 { (v6.next(), v4.next()) } else { (v4.next(), v6.next()) };
+            if first.is_none() && second.is_none() { break; }
+            ordered.extend(first);
+            ordered.extend(second);
+        }
+        connect_addresses(ws_url, host_token, &ordered, config, connector, ADDRESS_TIMEOUT).await
+    }).await.map_err(|_| "Relay connection timed out.".to_owned())??;
 
     let (write_half, read_half) = ws_stream.split();
     Ok((
@@ -107,6 +121,33 @@ pub async fn connect_ws(ws_url: &str, allow_local_http: bool, host_token: &str) 
             closed_sent: false,
         },
     ))
+}
+
+async fn connect_addresses(
+    ws_url: &str,
+    host_token: &str,
+    addresses: &[SocketAddr],
+    config: WebSocketConfig,
+    connector: Option<Connector>,
+    attempt_timeout: Duration,
+) -> Result<(ClientWsStream, tokio_tungstenite::tungstenite::handshake::client::Response), String> {
+    let mut last_error = "Relay address lookup returned no addresses.".to_owned();
+    for address in addresses {
+        let mut request = ws_url.into_client_request().map_err(|_| "Invalid WebSocket request.".to_owned())?;
+        let authorization = format!("Bearer {host_token}").parse().map_err(|_| "Invalid host authorization.".to_owned())?;
+        request.headers_mut().insert("Authorization", authorization);
+        let attempt = async {
+            let tcp = TcpStream::connect(address).await.map_err(WsError::Io)?;
+            client_async_tls_with_config(request, tcp, Some(config), connector.clone()).await
+        };
+        match timeout(attempt_timeout, attempt).await {
+            Ok(Ok(connection)) => return Ok(connection),
+            Ok(Err(err @ WsError::Http(_))) => return Err(sanitize_ws_connect_error(err)),
+            Ok(Err(err)) => last_error = sanitize_ws_connect_error(err),
+            Err(_) => last_error = "Relay connection timed out.".to_owned(),
+        }
+    }
+    Err(last_error)
 }
 
 impl WsWriter {
@@ -248,6 +289,26 @@ mod tests {
         accept_hdr_async,
         tungstenite::handshake::server::{Request as ServerRequest, Response as ServerResponse},
     };
+
+    #[tokio::test]
+    async fn falls_back_when_first_address_stalls_during_handshake() {
+        let stalled = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let working = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addresses = [stalled.local_addr().unwrap(), working.local_addr().unwrap()];
+        let stalled_task = tokio::spawn(async move {
+            let (_socket, _) = stalled.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_secs(3)).await;
+        });
+        let working_task = tokio::spawn(async move {
+            let (socket, _) = working.accept().await.unwrap();
+            tokio_tungstenite::accept_async(socket).await.unwrap()
+        });
+        let url = format!("ws://localhost:{}/", addresses[1].port());
+        let result = connect_addresses(&url, "test", &addresses, WebSocketConfig::default(), Some(Connector::Plain), Duration::from_millis(500)).await;
+        assert!(result.is_ok(), "second address should connect after a stalled handshake");
+        working_task.await.unwrap();
+        stalled_task.abort();
+    }
 
     #[tokio::test]
     async fn rejects_non_loopback_ws_even_with_allow_local_http() {

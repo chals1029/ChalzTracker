@@ -82,6 +82,8 @@ Open **Live Share** in the desktop app, then scan the QR code or copy the privat
 
 Treat the link and QR code as private. You can disable sharing or rotate the link in the desktop app. A new link is created whenever the app restarts.
 
+Live Share tries alternate relay addresses if a network route stalls. Keep the desktop app online; the browser cannot receive updates while its host is disconnected.
+
 ## Mobile companion
 
 The optional mobile companion provides another read-only view of your usage. See [mobile/README.md](mobile/README.md) for setup instructions.
