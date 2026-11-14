@@ -1,6 +1,9 @@
+pub mod live_share;
+pub mod live_ws;
+pub mod qr;
+pub mod mobile_sync;
 pub mod providers;
 pub mod vault;
-
 use axum::{body::{Body, Bytes}, extract::{DefaultBodyLimit, State}, http::{header, HeaderMap, Method, StatusCode, Uri}, response::{IntoResponse, Response}, routing::any, Router};
 use base64::Engine;
 use serde_json::{json, Value};
@@ -17,7 +20,7 @@ pub(crate) fn data_dir() -> Result<PathBuf, String> {
 }
 struct Session { public: Value, created: i64, browser: Option<Arc<providers::BrowserFlow>>, task: Option<tokio::task::AbortHandle>, label: String, tag: String, reauth: String }
 type NativeRoute = Arc<dyn Fn(&str, &Value, &Value) -> Result<(), String> + Send + Sync>;
-struct App { vault: Mutex<ChalzVault>, sessions: Mutex<HashMap<String, Session>>, refresh_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>, refresh_results: Mutex<HashMap<String,(u64,Vec<Value>)>>, client: reqwest::Client, events: broadcast::Sender<Value>, resources: PathBuf, dir: PathBuf, port: u16, window: Mutex<(bool,bool,String)>, notify: Arc<dyn Fn(Value) + Send + Sync>, native_route: NativeRoute, reset_wake: tokio::sync::Notify }
+struct App { vault: Mutex<ChalzVault>, sessions: Mutex<HashMap<String, Session>>, refresh_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>, refresh_results: Mutex<HashMap<String,(u64,Vec<Value>)>>, client: reqwest::Client, events: broadcast::Sender<Value>, resources: PathBuf, dir: PathBuf, port: u16, api_token: String, window: Mutex<(bool,bool,String)>, notify: Arc<dyn Fn(Value) + Send + Sync>, native_route: NativeRoute, reset_wake: tokio::sync::Notify, mobile_sync: mobile_sync::MobileSync, live_share: live_share::LiveShare }
 fn routed_accounts(v: &ChalzVault) -> (Vec<Value>, Vec<Value>) {
     let at = now();
     let mut accounts: Vec<_> = v.accounts.iter().map(|a| serialize_account_for_client(a, at)).collect();
@@ -27,6 +30,20 @@ fn routed_accounts(v: &ChalzVault) -> (Vec<Value>, Vec<Value>) {
 }
 
 impl App {
+    fn snapshot_accounts(&self) -> Vec<Value> {
+        let v = self.vault.lock().unwrap();
+        routed_accounts(&v).0
+    }
+    fn trigger_mobile_sync(&self) {
+        if self.mobile_sync.is_active() {
+            self.mobile_sync.wake.notify_one();
+        }
+    }
+    fn trigger_live_share(&self) {
+        if self.live_share.is_enabled() {
+            self.live_share.change_wake.notify_one();
+        }
+    }
     fn emit(&self, v: Value) { let _ = self.events.send(v); }
     fn payload(&self, alerts: Vec<Value>) -> Value {
         self.reset_wake.notify_one();
@@ -70,7 +87,10 @@ impl App {
         })).buffer_unordered(4).collect::<Vec<_>>().await;
         let mut alerts = Vec::new();
         for batch in batches { alerts.extend(batch?); }
-        Ok(Some(self.payload(alerts)))
+        let payload = self.payload(alerts);
+        self.trigger_mobile_sync();
+        self.trigger_live_share();
+        Ok(Some(payload))
     }
     async fn finalize(self: &Arc<Self>, id: &str, mut account: Value, report: Option<Value>) -> Result<Value,String> {
         let (label,tag,reauth,name,provider) = { let mut sessions=self.sessions.lock().unwrap(); let s=sessions.get_mut(id).ok_or("Sign-in session expired or not found.")?; if s.public["status"] != "pending" { return Err("Sign-in session is no longer pending.".into()); } s.public["status"]=json!("finalizing"); (s.label.clone(),s.tag.clone(),s.reauth.clone(),text(&s.public,"providerName").to_owned(),text(&s.public,"provider").to_owned()) };
@@ -79,7 +99,7 @@ impl App {
         let saved=&result["account"]; let duplicate=result["duplicate"].as_bool().unwrap_or(false); let aid=text(saved,"id").to_owned();
         if !duplicate { if let Some(r)=report { let alerts=self.vault.lock().unwrap().record_account_usage(&aid,Some(&r),None).map_err(|e|e.to_string())?; self.alerts(&alerts); } else { self.refresh_one(&aid,false).await?; } }
         let session={ let mut sessions=self.sessions.lock().unwrap(); let s=sessions.get_mut(id).ok_or("Sign-in cancelled.")?; s.public["status"]=json!("complete"); s.public["duplicate"]=json!(duplicate); s.public["accountId"]=saved["id"].clone(); s.public["accountLabel"]=saved["label"].clone(); s.browser=None; s.public.clone() };
-        if !duplicate { self.emit(json!({"type":"accounts_updated","accountId":aid,"label":saved["label"],"provider":provider})); } Ok(session)
+        if !duplicate { self.emit(json!({"type":"accounts_updated","accountId":aid,"label":saved["label"],"provider":provider})); self.trigger_mobile_sync(); self.trigger_live_share(); } Ok(session)
     }
 }
 fn kimi_headers(device: &str) -> reqwest::header::HeaderMap {
@@ -96,6 +116,7 @@ fn open_browser(url: &str) { #[cfg(target_os="windows")] { let _=std::process::C
 
 pub struct BackendHandle { pub port: u16, app: Arc<App>, shutdown: Option<oneshot::Sender<()>>, thread: Option<std::thread::JoinHandle<()>> }
 impl BackendHandle {
+    pub fn api_token(&self) -> &str { &self.app.api_token }
     /// Read the same cached account state used by the API without refreshing providers.
     pub fn account_snapshot(&self) -> Vec<Value> {
         let vault = self.app.vault.lock().unwrap();
@@ -104,17 +125,32 @@ impl BackendHandle {
 }
 impl Drop for BackendHandle { fn drop(&mut self) { if let Some(s)=self.shutdown.take() { let _=s.send(()); } if let Some(t)=self.thread.take() { let _=t.join(); } } }
 pub fn start(notify: Arc<dyn Fn(Value) + Send + Sync>, native_route: NativeRoute) -> Result<BackendHandle,Box<dyn std::error::Error>> {
-    let dir=data_dir().map_err(std::io::Error::other)?; let vault=ChalzVault::new(dir.clone())?; let client=providers::provider_client().map_err(std::io::Error::other)?;
+    let dir=data_dir().map_err(std::io::Error::other)?; let vault=ChalzVault::new(dir.clone())?; let mobile_sync=mobile_sync::MobileSync::new(dir.clone())?; let live_share=live_share::LiveShare::with_preferences(dir.clone()); let client=providers::provider_client().map_err(std::io::Error::other)?;
     let resources=PathBuf::from(std::env::var_os("CHALZ_APP_RESOURCES").ok_or("CHALZ_APP_RESOURCES is not set")?);
+    let mut token_bytes = [0u8; 32];
+    ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut token_bytes).map_err(|_| std::io::Error::other("Could not generate local API capability"))?;
+    let api_token = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(token_bytes);
     let listener=std::net::TcpListener::bind(("127.0.0.1",0))?; listener.set_nonblocking(true)?; let port=listener.local_addr()?.port();
-    let (events,_)=broadcast::channel(256); let app=Arc::new(App { vault:Mutex::new(vault), sessions:Mutex::new(HashMap::new()), refresh_locks:Mutex::new(HashMap::new()), refresh_results:Mutex::new(HashMap::new()),client,events,resources,dir,port,window:Mutex::new((false,false,"dashboard".into())),notify,native_route,reset_wake:tokio::sync::Notify::new() });
-    let (shutdown,rx)=oneshot::channel(); let runtime_app=app.clone(); let thread=std::thread::spawn(move || { let rt=tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("backend runtime"); rt.block_on(async move { let listener=tokio::net::TcpListener::from_std(listener).expect("backend listener"); tokio::spawn(background(runtime_app.clone())); let router=Router::new().fallback(any(handle)).layer(DefaultBodyLimit::max(4*1024*1024*4/3+1024)).with_state(runtime_app); tokio::select! { _=rx=>{}, _=async { let _=axum::serve(listener,router.into_make_service_with_connect_info::<SocketAddr>()).await; }=>{} } }); });
+    let (events,_)=broadcast::channel(256); let app=Arc::new(App { vault:Mutex::new(vault), sessions:Mutex::new(HashMap::new()), refresh_locks:Mutex::new(HashMap::new()), refresh_results:Mutex::new(HashMap::new()),client,events,resources,dir,port,api_token,window:Mutex::new((false,false,"dashboard".into())),notify,native_route,reset_wake:tokio::sync::Notify::new(),mobile_sync,live_share });
+    let (shutdown,rx)=oneshot::channel(); let runtime_app=app.clone(); let thread=std::thread::spawn(move || { let rt=tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("backend runtime"); rt.block_on(async move { let listener=tokio::net::TcpListener::from_std(listener).expect("backend listener"); let (live_shutdown_tx,live_shutdown_rx)=tokio::sync::watch::channel(false); tokio::spawn(background(runtime_app.clone())); tokio::spawn(mobile_sync_loop(runtime_app.clone())); let live_handle=tokio::spawn(live_share_loop(runtime_app.clone(),live_shutdown_rx)); let router=Router::new().fallback(any(handle)).layer(DefaultBodyLimit::max(4*1024*1024*4/3+1024)).with_state(runtime_app); tokio::select! { _=rx=>{}, _=async { let _=axum::serve(listener,router.into_make_service_with_connect_info::<SocketAddr>()).await; }=>{} } let _=live_shutdown_tx.send(true); let _=tokio::time::timeout(Duration::from_millis(700),live_handle).await; }); });
     Ok(BackendHandle { port, app, shutdown:Some(shutdown), thread:Some(thread) })
+}
+fn requires_api_auth(method: &Method, path: &str) -> bool {
+    method != Method::GET || path == "/api" || path.starts_with("/api/")
+}
+fn api_authorized(headers: &HeaderMap, token: &str) -> bool {
+    let mut values = headers.get_all("x-chalz-capability").iter();
+    let Some(value) = values.next() else { return false; };
+    if values.next().is_some() { return false; }
+    let comparison_key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, b"chalztracker-local-capability-v1");
+    let expected = ring::hmac::sign(&comparison_key, token.as_bytes());
+    ring::hmac::verify(&comparison_key, value.as_bytes(), expected.as_ref()).is_ok()
 }
 async fn handle(State(app): State<Arc<App>>, method: Method, uri: Uri, headers: HeaderMap, body: Bytes) -> Response {
     let origin=format!("http://127.0.0.1:{}",app.port); let host=format!("127.0.0.1:{}",app.port);
     if headers.get(header::HOST).and_then(|v|v.to_str().ok()) != Some(host.as_str()) || headers.get(header::ORIGIN).is_some_and(|v|v.to_str().ok()!=Some(origin.as_str())) { return error(StatusCode::FORBIDDEN,"Forbidden"); }
     if uri.authority().is_some() || uri.scheme().is_some() { return error(StatusCode::BAD_REQUEST,"Bad request"); }
+    if requires_api_auth(&method, uri.path()) && !api_authorized(&headers, &app.api_token) { return error(StatusCode::UNAUTHORIZED,"Unauthorized"); }
     if method!=Method::GET && (headers.get(header::ORIGIN).and_then(|v|v.to_str().ok())!=Some(origin.as_str()) || (method!=Method::DELETE && headers.get(header::CONTENT_TYPE).and_then(|v|v.to_str().ok()).and_then(|v|v.split(';').next()).map(str::trim).map(str::to_ascii_lowercase).as_deref()!=Some("application/json"))) { return error(StatusCode::FORBIDDEN,"Forbidden"); }
     let path=uri.path(); let max=if path=="/api/appearance" { 4*1024*1024*4/3+1024 } else { 16384 }; if body.len()>max { return error(StatusCode::PAYLOAD_TOO_LARGE,"Request too large."); }
     let b=if method!=Method::GET && method!=Method::DELETE && !body.is_empty() { match serde_json::from_slice::<Value>(&body) { Ok(v) if v.is_object()=>v, _=>return error(StatusCode::BAD_REQUEST,"Invalid request.") } } else { json!({}) };
@@ -129,6 +165,75 @@ async fn handle(State(app): State<Arc<App>>, method: Method, uri: Uri, headers: 
         ("POST","/api/settings")=>{ let r=app.vault.lock().unwrap().update_settings(&b); match r { Ok(v)=>answer(ok,json!({"ok":true,"settings":v})),Err(_)=>error(StatusCode::INTERNAL_SERVER_ERROR,"Request failed.") } },
         ("GET","/api/appearance")=>match read_appearance(&app.dir) { Ok(v)=>answer(ok,v),Err(_)=>error(StatusCode::INTERNAL_SERVER_ERROR,"Request failed.") },
         ("POST","/api/appearance")=>match save_appearance(&app.dir,&b) { Ok(())=>answer(ok,json!({"ok":true})),Err(e)=>error(StatusCode::BAD_REQUEST,&e) },
+        ("GET","/api/mobile-sync")=>answer(ok,app.mobile_sync.status_json()),
+        ("POST","/api/mobile-sync/enable")=>{
+            let relay_url=text(&b,"relayUrl");
+            let allow_local_http=b.get("allowLocalHttp").and_then(Value::as_bool).unwrap_or(false);
+            let interval=b.get("syncIntervalSecs").and_then(Value::as_u64);
+            let accounts=app.snapshot_accounts();
+            match app.mobile_sync.enable(relay_url,allow_local_http,interval,&accounts).await {
+                Ok((status,sync_error))=>{app.emit(json!({"type":"mobile_sync_updated","status":status}));answer(ok,json!({"ok":true,"status":status,"syncError":sync_error}))},
+                Err(msg)=>error(StatusCode::BAD_REQUEST,&msg),
+            }
+        },
+        ("POST","/api/mobile-sync/rotate")=>{
+            let relay_url=b.get("relayUrl").and_then(Value::as_str);
+            let allow_local_http=b.get("allowLocalHttp").and_then(Value::as_bool);
+            let interval=b.get("syncIntervalSecs").and_then(Value::as_u64);
+            let accounts=app.snapshot_accounts();
+            match app.mobile_sync.rotate(relay_url,allow_local_http,interval,&accounts).await {
+                Ok((status,revoke_warning,sync_error))=>{app.emit(json!({"type":"mobile_sync_updated","status":status}));answer(ok,json!({"ok":true,"status":status,"revokeWarning":revoke_warning,"syncError":sync_error}))},
+                Err(msg)=>{app.emit(json!({"type":"mobile_sync_updated","status":app.mobile_sync.status_json()}));error(StatusCode::BAD_REQUEST,&msg)},
+            }
+        },
+        ("POST","/api/mobile-sync/sync-now")=>{
+            let accounts=app.snapshot_accounts();
+            match app.mobile_sync.publish_snapshot(&accounts).await {
+                Ok(status)=>{app.emit(json!({"type":"mobile_sync_updated","status":status}));answer(ok,json!({"ok":true,"status":status}))},
+                Err(msg)=>{let status=app.mobile_sync.status_json();app.emit(json!({"type":"mobile_sync_updated","status":status}));answer(StatusCode::BAD_GATEWAY,json!({"error":msg,"status":status}))},
+            }
+        },
+        ("POST","/api/mobile-sync/settings")=>{
+            let Some(interval)=b.get("syncIntervalSecs").and_then(Value::as_u64) else {return error(StatusCode::BAD_REQUEST,"syncIntervalSecs is required.");};
+            match app.mobile_sync.update_settings(interval).await {
+                Ok(status)=>{app.emit(json!({"type":"mobile_sync_updated","status":status}));answer(ok,json!({"ok":true,"status":status}))},
+                Err(msg)=>error(StatusCode::BAD_REQUEST,&msg),
+            }
+        },
+        ("POST","/api/mobile-sync/disconnect")=>{
+            match app.mobile_sync.disconnect_and_revoke().await {
+                Ok(res)=>{app.emit(json!({"type":"mobile_sync_updated","status":res["status"]}));answer(ok,res)},
+                Err(msg)=>error(StatusCode::INTERNAL_SERVER_ERROR,&msg),
+            }
+        },
+        ("GET","/api/live-share")=>answer(ok,app.live_share.status_json()),
+        ("POST","/api/live-share/enable")=>{
+            let relay_url=b.get("relayUrl").and_then(Value::as_str);
+            let allow_local_http=b.get("allowLocalHttp").and_then(Value::as_bool);
+            match app.live_share.enable(relay_url,allow_local_http).await {
+                Ok(status)=>{app.emit(json!({"type":"live_share_updated","status":status}));answer(ok,json!({"ok":true,"status":status}))},
+                Err(msg)=>error(StatusCode::BAD_REQUEST,&msg),
+            }
+        },
+        ("POST","/api/live-share/rotate")=>{
+            let relay_url=b.get("relayUrl").and_then(Value::as_str);
+            let allow_local_http=b.get("allowLocalHttp").and_then(Value::as_bool);
+            match app.live_share.rotate(relay_url,allow_local_http).await {
+                Ok(status)=>{app.emit(json!({"type":"live_share_updated","status":status}));answer(ok,json!({"ok":true,"status":status}))},
+                Err(msg)=>error(StatusCode::BAD_REQUEST,&msg),
+            }
+        },
+        ("POST","/api/live-share/disable")=>{
+            let status=app.live_share.disable().await;
+            app.emit(json!({"type":"live_share_updated","status":status}));
+            answer(ok,json!({"ok":true,"status":status}))
+        },
+        ("POST","/api/live-share/sync-now")=>{
+            match app.live_share.trigger_manual_push() {
+                Ok(())=>answer(ok,json!({"ok":true,"status":app.live_share.status_json()})),
+                Err(msg)=>error(StatusCode::BAD_REQUEST,&msg),
+            }
+        },
         ("GET","/api/window/events")=>{ use futures_util::StreamExt; let (top,tray,_) = app.window.lock().unwrap().clone(); let initial=futures_util::stream::once(async move { Ok::<_,Infallible>(format!("data: {}\n\n",json!({"type":"state","topmost":top,"tray":tray}))) }); let stream=tokio_stream::wrappers::BroadcastStream::new(app.events.subscribe()).filter_map(|x| async move { x.ok().map(|v|Ok::<_,Infallible>(format!("data: {}\n\n",v))) }); return Response::builder().status(200).header(header::CONTENT_TYPE,"text/event-stream; charset=utf-8").header(header::CACHE_CONTROL,"no-store").header(header::X_CONTENT_TYPE_OPTIONS,"nosniff").body(Body::from_stream(initial.chain(stream))).unwrap(); },
         ("GET","/api/window")=>{ let (top,tray,_)=app.window.lock().unwrap().clone(); answer(ok,json!({"topmost":top,"tray":tray,"clients":app.events.receiver_count()})) },
         ("POST","/api/window")=>window_transition(&app,&b),
@@ -139,8 +244,8 @@ async fn handle(State(app): State<Arc<App>>, method: Method, uri: Uri, headers: 
         ("POST","/api/accounts/cancel")=>{if let Some(mut s)=app.sessions.lock().unwrap().remove(text(&b,"id")){if let Some(t)=s.task.take(){t.abort();}}answer(ok,json!({"ok":true}))},
         ("POST","/api/accounts/open-url")=>{let u=app.sessions.lock().unwrap().get(text(&b,"id")).map(|s|text(&s.public,"authUrl").to_owned()).unwrap_or_default();if u.is_empty(){error(StatusCode::NOT_FOUND,"No active browser URL for this sign-in session.")}else{open_browser(&u);answer(ok,json!({"ok":true}))}},
         ("POST","/api/accounts/complete")=>{let id=text(&b,"id");let (flow,completed)={let sessions=app.sessions.lock().unwrap();match sessions.get(id){Some(s)=>(s.browser.clone(),if s.public["status"]=="complete" {Some(s.public.clone())}else{None}),None=>(None,None)}};if let Some(s)=completed{return answer(ok,merge(json!({"session":s}),app.payload(vec![])));} match flow { Some(f)=>match providers::parse_manual_auth_input(text(&b,"code")) { Ok((Some(code),state))=>match providers::complete_browser_flow(&app.client,&f,&code,state.as_deref(),true).await {Ok(a)=>match app.finalize(id,a,None).await {Ok(s)=>{if let Some(task)=app.sessions.lock().unwrap().get_mut(id).and_then(|s|s.task.take()){task.abort();}answer(ok,merge(json!({"session":s}),app.payload(vec![])))},Err(e)=>error(StatusCode::BAD_REQUEST,&e)},Err(e)=>error(StatusCode::BAD_REQUEST,&e)},Ok(_)=>error(StatusCode::BAD_REQUEST,"Please enter an authorization code."),Err(e)=>error(StatusCode::BAD_REQUEST,&e)}, None=>error(StatusCode::BAD_REQUEST,"This sign-in flow completes automatically in your browser.") }},
-        _ if path.starts_with("/api/accounts/") && method==Method::PATCH => {let id=percent_encoding::percent_decode_str(&path[14..]).decode_utf8_lossy().to_string();let r=app.vault.lock().unwrap().update_account_meta(&id,&b);match r {Ok(Some(_))=>answer(ok,merge(json!({"ok":true}),app.payload(vec![]))),Ok(None)=>error(StatusCode::NOT_FOUND,"Account not found."),Err(_)=>error(StatusCode::INTERNAL_SERVER_ERROR,"Request failed.")}},
-        _ if path.starts_with("/api/accounts/") && method==Method::DELETE => {let id=percent_encoding::percent_decode_str(&path[14..]).decode_utf8_lossy().to_string();let r=app.vault.lock().unwrap().remove_account(&id);match r {Ok(Some(a))=>answer(ok,merge(json!({"ok":true,"removedLabel":a["label"]}),app.payload(vec![]))),Ok(None)=>error(StatusCode::NOT_FOUND,"Account not found."),Err(_)=>error(StatusCode::INTERNAL_SERVER_ERROR,"Request failed.")}},
+        _ if path.starts_with("/api/accounts/") && method==Method::PATCH => {let id=percent_encoding::percent_decode_str(&path[14..]).decode_utf8_lossy().to_string();let r=app.vault.lock().unwrap().update_account_meta(&id,&b);match r {Ok(Some(_))=>{app.trigger_mobile_sync();app.trigger_live_share();answer(ok,merge(json!({"ok":true}),app.payload(vec![])))},Ok(None)=>error(StatusCode::NOT_FOUND,"Account not found."),Err(_)=>error(StatusCode::INTERNAL_SERVER_ERROR,"Request failed.")}},
+        _ if path.starts_with("/api/accounts/") && method==Method::DELETE => {let id=percent_encoding::percent_decode_str(&path[14..]).decode_utf8_lossy().to_string();let r=app.vault.lock().unwrap().remove_account(&id);match r {Ok(Some(a))=>{app.trigger_mobile_sync();app.trigger_live_share();answer(ok,merge(json!({"ok":true,"removedLabel":a["label"]}),app.payload(vec![])))},Ok(None)=>error(StatusCode::NOT_FOUND,"Account not found."),Err(_)=>error(StatusCode::INTERNAL_SERVER_ERROR,"Request failed.")}},
         _ if method==Method::GET => static_file(&app.resources,path),
         _=>error(StatusCode::NOT_FOUND,"Not found.")
     }
@@ -294,7 +399,7 @@ async fn redeem(app:&Arc<App>,id:&str)->Response {
     if let Err(e)=providers::ensure_fresh_credentials(&app.client,&mut account,&headers).await {return error(StatusCode::BAD_REQUEST,&e);}
     let report=match providers::redeem_codex_banked_reset(&app.client,&mut account).await {Ok(r)=>r,Err(e)=>return error(StatusCode::BAD_REQUEST,&e)};
     let result={let mut v=app.vault.lock().unwrap();if let Some(existing)=v.accounts.iter_mut().find(|a|text(a,"id")==id){existing["credentials"]=account["credentials"].clone();}v.record_account_usage(id,Some(&report),None)};
-    match result {Ok(alerts)=>{app.alerts(&alerts);app.emit(json!({"type":"accounts_updated","reason":"banked_redeemed","accountId":id}));answer(StatusCode::OK,merge(json!({"ok":true}),app.payload(alerts)))},Err(_)=>error(StatusCode::INTERNAL_SERVER_ERROR,"Request failed.")}
+    match result {Ok(alerts)=>{app.alerts(&alerts);app.emit(json!({"type":"accounts_updated","reason":"banked_redeemed","accountId":id}));app.trigger_mobile_sync();app.trigger_live_share();answer(StatusCode::OK,merge(json!({"ok":true}),app.payload(alerts)))},Err(_)=>error(StatusCode::INTERNAL_SERVER_ERROR,"Request failed.")}
 }
 fn test_alert(app:&App,body:&Value)->Response {
     let v=app.vault.lock().unwrap();let requested=text(body,"provider");let account=v.accounts.iter().filter(|a|a["enabled"]!=false).find(|a|!requested.is_empty() && text(a,"provider")==requested).or_else(||v.accounts.iter().find(|a|a["enabled"]!=false));
@@ -308,10 +413,45 @@ async fn background(app:Arc<App>) {
     loop {
         app.clean_sessions(); let at=now(); let mut next=at+60_000; let mut due=std::collections::HashSet::new();
         { let v=app.vault.lock().unwrap(); for a in &v.accounts { if a["enabled"]==false {continue;} if let Some(limits)=a["lastReport"]["limits"].as_array() { for l in limits { if l["usedFraction"].as_f64().unwrap_or(0.0)<0.01 {continue;} let reset=l["resetsAt"].as_i64().or_else(||l["resetsAt"].as_str().and_then(|s|chrono::DateTime::parse_from_rfc3339(s).ok().map(|d|d.timestamp_millis()))); if let Some(t)=reset {if t<at-45_000 {continue;}let key=(text(a,"id").to_owned(),t);let (count,last)=attempts.get(&key).copied().unwrap_or((0,0));if count>=2 {continue;}let deadline=(t+3500).max(last+3500);if deadline<=at {attempts.insert(key.clone(),(count+1,at));due.insert(key.0);}else{next=next.min(deadline);}} } } } }
-        if attempts.len()>200 {attempts.clear();} if !due.is_empty() {for id in due {let _=app.refresh_one(&id,false).await;}app.emit(json!({"type":"accounts_updated","reason":"window_reset"}));continue;}
+        if attempts.len()>200 {attempts.clear();} if !due.is_empty() {for id in due {let _=app.refresh_one(&id,false).await;}app.emit(json!({"type":"accounts_updated","reason":"window_reset"}));app.trigger_mobile_sync();app.trigger_live_share();continue;}
         let tray=app.window.lock().unwrap().1; if tray && at-last_tray>=60_000 {last_tray=at;let _=app.refresh_accounts(None,false).await;continue;} if tray {next=next.min(last_tray+60_000);}
         let delay=Duration::from_millis((next-now()).max(1) as u64);tokio::select! { _=tokio::time::sleep(delay)=>{}, _=app.reset_wake.notified()=>{} }
     }
+}
+
+async fn mobile_sync_loop(app: Arc<App>) {
+    loop {
+        if !app.mobile_sync.is_active() {
+            app.mobile_sync.wake.notified().await;
+            continue;
+        }
+        let interval = app.mobile_sync.sync_interval();
+        tokio::select! {
+            _ = tokio::time::sleep(interval) => {},
+            _ = app.mobile_sync.wake.notified() => {
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+        }
+        if !app.mobile_sync.is_active() {
+            continue;
+        }
+        let accounts = app.snapshot_accounts();
+        let _ = app.mobile_sync.publish_snapshot(&accounts).await;
+        app.emit(json!({"type": "mobile_sync_updated", "status": app.mobile_sync.status_json()}));
+    }
+}
+async fn live_share_loop(app: Arc<App>, shutdown_rx: tokio::sync::watch::Receiver<bool>) {
+    app.live_share.restore_at_startup().await;
+    app.emit(json!({"type": "live_share_updated", "status": app.live_share.status_json()}));
+    let snapshot_app = app.clone();
+    let emit_app = app.clone();
+    live_share::run_live_share_loop(
+        &app.live_share,
+        move || snapshot_app.snapshot_accounts(),
+        move |status| emit_app.emit(json!({"type": "live_share_updated", "status": status})),
+        shutdown_rx,
+    )
+    .await;
 }
 
 fn window_transition(app:&App,body:&Value)->Response {
@@ -348,5 +488,71 @@ mod appearance_tests {
         assert!(save_appearance(dir.path(), &json!({"ui": legacy["ui"]})).is_err());
         let persisted: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
         assert_eq!(persisted, expected);
+    }
+}
+
+#[cfg(test)]
+mod local_api_security_tests {
+    use super::*;
+
+    fn test_app(dir: &std::path::Path) -> Arc<App> {
+        let (events, _) = broadcast::channel(16);
+        Arc::new(App {
+            vault: Mutex::new(ChalzVault::new(dir.to_path_buf()).unwrap()),
+            sessions: Mutex::new(HashMap::new()),
+            refresh_locks: Mutex::new(HashMap::new()),
+            refresh_results: Mutex::new(HashMap::new()),
+            client: providers::provider_client().unwrap(),
+            events,
+            resources: dir.to_path_buf(),
+            dir: dir.to_path_buf(),
+            port: 43210,
+            api_token: "test-capability".into(),
+            window: Mutex::new((false, false, "dashboard".into())),
+            notify: Arc::new(|_| {}),
+            native_route: Arc::new(|_, _, _| Ok(())),
+            reset_wake: tokio::sync::Notify::new(),
+            mobile_sync: mobile_sync::MobileSync::new(dir.to_path_buf()).unwrap(),
+            live_share: live_share::LiveShare::with_preferences(dir.to_path_buf()),
+        })
+    }
+
+    async fn call(app: Arc<App>, method: Method, path: &str, token: Option<&str>) -> Response {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, "127.0.0.1:43210".parse().unwrap());
+        headers.insert(header::ORIGIN, "http://127.0.0.1:43210".parse().unwrap());
+        headers.insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
+        if let Some(token) = token { headers.insert("x-chalz-capability", token.parse().unwrap()); }
+        handle(State(app), method, path.parse().unwrap(), headers, Bytes::from_static(b"{}")).await
+    }
+
+    #[tokio::test]
+    async fn api_and_event_stream_require_the_capability() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = test_app(dir.path());
+        std::fs::write(dir.path().join("app.js"), "// asset").unwrap();
+        assert_eq!(call(app.clone(), Method::GET, "/app.js", None).await.status(), StatusCode::OK);
+        for (method, path) in [(Method::GET, "/api/providers"), (Method::GET, "/api/mobile-sync"), (Method::GET, "/api/live-share"), (Method::GET, "/api/window/events"), (Method::POST, "/api/window")] {
+            for token in [None, Some("wrong-capability")] {
+                assert_eq!(call(app.clone(), method.clone(), path, token).await.status(), StatusCode::UNAUTHORIZED);
+            }
+            let response = call(app.clone(), method, path, Some("test-capability")).await;
+            assert_eq!(response.status(), StatusCode::OK);
+            if path.ends_with("/events") {
+                assert_eq!(response.headers().get(header::CONTENT_TYPE).unwrap(), "text/event-stream; charset=utf-8");
+                use futures_util::StreamExt;
+                let mut stream = response.into_body().into_data_stream();
+                let initial = stream.next().await.unwrap().unwrap();
+                assert!(std::str::from_utf8(&initial).unwrap().contains("\"type\":\"state\""));
+                app.emit(json!({"type":"accounts_updated"}));
+                let event = stream.next().await.unwrap().unwrap();
+                assert!(std::str::from_utf8(&event).unwrap().contains("accounts_updated"));
+            }
+        }
+        let mut headers = HeaderMap::new();
+        headers.append("x-chalz-capability", "test-capability".parse().unwrap());
+        headers.append("x-chalz-capability", "wrong-capability".parse().unwrap());
+        assert!(!api_authorized(&headers, "test-capability"));
+        assert!(!requires_api_auth(&Method::GET, "/app.js"));
     }
 }

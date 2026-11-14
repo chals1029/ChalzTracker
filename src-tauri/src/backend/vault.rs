@@ -142,11 +142,35 @@ pub fn enrich_limit_with_pace(limit: &Value, at: i64) -> Value {
         let mut pace=json!({"durationMs":d,"elapsedFraction":(fraction*1000.0).round()/1000.0,"paceDelta":(delta*1000.0).round()/1000.0,"status":status}); if let Some(e)=exhaust.filter(|e| *e!=0) { pace["exhaustsInMs"]=json!(e); } out["pace"]=pace;
     } } out
 }
+fn serialize_banked_resets(b: &Value, at: i64) -> Value {
+    let Some(reported_count) = number(b, "count").filter(|n| *n >= 0.0) else { return Value::Null };
+    let mut items: Vec<Value> = b["items"].as_array().into_iter().flatten().filter_map(|item| {
+        if !item.is_object() { return None; }
+        Some(json!({
+            "expiresAt": if date(&item["expiresAt"]).is_some() { item["expiresAt"].clone() } else { Value::Null },
+            "grantedAt": if date(&item["grantedAt"]).is_some() { item["grantedAt"].clone() } else { Value::Null },
+        }))
+    }).collect();
+    let complete = reported_count.fract() == 0.0 && items.len() as f64 == reported_count
+        && items.iter().all(|item| date(&item["expiresAt"]).is_some());
+    if complete { items.retain(|item| date(&item["expiresAt"]).is_some_and(|expiry| expiry > at)); }
+    let count = if complete { items.len() as f64 } else { reported_count };
+    let from_items = items.iter().filter_map(|item| date(&item["expiresAt"]).filter(|expiry| *expiry > at).map(|expiry| (expiry, item["expiresAt"].clone()))).min_by_key(|item| item.0);
+    let from_summary = if complete { None } else { date(&b["earliestExpiresAt"]).filter(|expiry| *expiry > at).map(|expiry| (expiry, b["earliestExpiresAt"].clone())) };
+    let earliest = match (from_items, from_summary) {
+        (Some(a), Some(b)) => Some(if a.0 <= b.0 { a } else { b }),
+        (a, b) => a.or(b),
+    };
+    json!({"count":count,"earliestExpiresAt":earliest.as_ref().map(|v|v.1.clone()).unwrap_or(Value::Null),
+        "redeemable":truth(b,"redeemable") && count>0.0,
+        "expiringSoon":earliest.is_some_and(|(expiry,_)|expiry-at<=48*HOUR),"items":items})
+}
+
 pub fn serialize_account_for_client(acc: &Value, at: i64) -> Value {
     let report=&acc["lastReport"]; let raw=report["limits"].as_array(); let has=raw.map_or(false, |l| !l.is_empty());
     let status=if !truth(acc,"enabled") { "Paused" } else if has && acc["lastError"].is_null() { "Reporting" } else if has { "Stale" } else { "Unavailable" };
     let limits: Vec<_>=raw.map(|v| v.iter().map(|l| enrich_limit_with_pace(l,at)).collect()).unwrap_or_default();
-    let b=&report["bankedResets"]; let banked=if let Some(count)=number(b,"count") { let exp=date(&b["earliestExpiresAt"]).filter(|x| *x>at); json!({"count":count,"earliestExpiresAt":if exp.is_some(){b["earliestExpiresAt"].clone()}else{Value::Null},"redeemable":truth(b,"redeemable") && count>0.0,"expiringSoon":exp.map_or(false,|x|x-at<=48*HOUR)}) } else { Value::Null };
+    let banked = serialize_banked_resets(&report["bankedResets"], at);
     let first=|keys:&[&str]| keys.iter().map(|k| &acc[*k]).find(|v| !v.is_null() && v.as_str().map_or(true,|s|!s.is_empty())).cloned().unwrap_or(Value::Null);
     json!({"id":acc["id"],"provider":acc["provider"],"providerId":first(&["orgName","planType","projectId","accountId","provider"]),"label":clean_display_label(text(acc,"label"),text(acc,"provider")),"tag":text(acc,"tag"),"pinned":truth(acc,"pinned"),"enabled":acc["enabled"].as_bool()!=Some(false),"email":first(&["email"]),"planType":first(&["planType"]),"orgName":first(&["orgName"]),"projectId":first(&["projectId"]),"authType":if text(&acc["credentials"],"type").is_empty(){"oauth"}else{text(&acc["credentials"],"type")},"status":status,"limits":limits,"bankedResets":banked,"updatedAt":if !report["fetchedAt"].is_null(){report["fetchedAt"].clone()}else{acc["updatedAt"].clone()},"error":acc["lastError"],"recommended":false,"recommendReason":null,"routerScore":null})
 }
@@ -203,5 +227,35 @@ impl ChalzVault {
             let vals:Vec<f64>=limits.iter().filter_map(|l|number(l,"usedFraction").map(|u|u.clamp(0.0,1.0))).collect();if !vals.is_empty(){let peak=(vals.iter().copied().fold(f64::NEG_INFINITY,f64::max)*1000.0).round()/1000.0;let avg=(vals.iter().sum::<f64>()/vals.len() as f64*1000.0).round()/1000.0;let last=self.snapshots.iter().rev().find(|s|text(s,"accountId")==id);let due=last.map_or(true,|s|(number(s,"peakUsed").unwrap_or(0.0)-peak).abs()>=0.01 || at-s["t"].as_i64().unwrap_or(0)>=300_000);if due{self.snapshots.push(json!({"t":at,"accountId":id,"provider":provider,"label":account["label"],"peakUsed":peak,"avgUsed":avg,"windows":vals.len()}));trim_tail(&mut self.snapshots,MAX_SNAPSHOTS);self.save_history()?;}}
         } else if let Some(e)=error.filter(|e|!e.is_empty()){account["lastError"]=json!(e);account["updatedAt"]=json!(at);}
         self.accounts[idx]=account;self.save_accounts()?;Ok(alerts)
+    }
+}
+
+#[cfg(test)]
+mod banked_reset_tests {
+    use super::*;
+
+    #[test]
+    fn complete_credits_expire_without_exposing_identifiers() {
+        let now = 1_700_000_000_000i64;
+        let account = json!({"provider":"codex", "lastReport":{"bankedResets":{
+            "count":2, "redeemable":true, "items":[
+                {"id":"secret1", "source":"private", "expiresAt":now-1, "grantedAt":now-10},
+                {"id":"secret2", "source":"private", "expiresAt":now+1000, "grantedAt":now-20}
+            ]
+        }}});
+        let banked = serialize_account_for_client(&account, now)["bankedResets"].clone();
+        assert_eq!(banked["count"], 1.0);
+        assert_eq!(banked["earliestExpiresAt"], now+1000);
+        assert_eq!(banked["items"][0]["grantedAt"], now-20);
+        assert!(banked["items"][0].get("id").is_none());
+        assert!(banked["items"][0].get("source").is_none());
+        assert_eq!(serialize_account_for_client(&account, now+1001)["bankedResets"]["count"], 0.0);
+    }
+
+    #[test]
+    fn incomplete_credit_details_do_not_guess_count() {
+        let banked = serialize_banked_resets(&json!({"count":3,"redeemable":true,"items":[{"expiresAt":1000}]}), 2000);
+        assert_eq!(banked["count"], 3.0);
+        assert_eq!(banked["items"][0]["expiresAt"], 1000);
     }
 }

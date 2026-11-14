@@ -293,7 +293,36 @@ const state = {
   widgetGroupByProvider: true,
   selectedAccountId: null,
   providerAccountSelection: new Map(),
-  topmost: false
+  topmost: false,
+  mobileSync: {
+    enabled: false,
+    paired: false,
+    relayUrl: '',
+    allowLocalHttp: false,
+    syncIntervalSecs: 60,
+    roomCreated: false,
+    lastPublishedAt: null,
+    lastError: null,
+    lastStatus: 'disabled',
+    pairingPayload: null
+  },
+  liveShare: {
+    configured: false,
+    defaultRelayUrl: null,
+    configError: null,
+    defaultAllowLocalHttp: false,
+    enabled: false,
+    connected: false,
+    status: 'disabled',
+    relayUrl: '',
+    allowLocalHttp: false,
+    usingOverride: false,
+    shareUrl: null,
+    qrMatrix: null,
+    guestEvents: 0,
+    lastPublishedAt: null,
+    lastError: null
+  }
 };
 
 const emailPattern = /[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?(?:\.[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?)+/gi;
@@ -729,6 +758,545 @@ async function toggleAlertsSetting() {
   showToast(next ? 'Scheduled, banked & threshold alerts enabled' : 'All notifications muted');
 }
 
+function mobileSyncMessage(message, isError = false) {
+  const el = $('mobile-sync-message');
+  if (!el) return;
+  el.hidden = !message;
+  el.textContent = message ? String(message) : '';
+  el.classList.toggle('error', Boolean(isError));
+}
+
+function syncMobileSyncUi() {
+  const ms = state.mobileSync || {};
+  const paired = Boolean(ms.paired);
+  const hasError = Boolean(ms.lastError);
+  const syncState = paired ? (hasError ? 'error' : 'synced') : (ms.lastStatus === 'revoke_warning' ? 'error' : 'disabled');
+
+  const topBtn = $('open-mobile-sync-btn');
+  const topLabel = $('mobile-sync-btn-label');
+  if (topBtn) {
+    topBtn.setAttribute('aria-pressed', String(paired));
+    topBtn.dataset.syncState = syncState;
+    topBtn.title = paired
+      ? (hasError ? `Mobile Companion error: ${ms.lastError}` : 'Mobile Companion synced (click to manage)')
+      : 'Mobile Companion — End-to-End Encrypted Read-Only Sync';
+  }
+  if (topLabel) {
+    topLabel.textContent = paired ? (hasError ? 'Mobile Error' : 'Mobile Synced') : 'Mobile Off';
+  }
+  const vaultBtn = $('vault-mobile-sync-btn');
+  if (vaultBtn) {
+    vaultBtn.setAttribute('aria-pressed', String(paired));
+    vaultBtn.textContent = paired ? 'Mobile Synced' : 'Mobile Companion';
+  }
+
+  const banner = $('mobile-sync-status-banner');
+  const bannerText = $('mobile-sync-status-text');
+  if (banner && bannerText) {
+    banner.dataset.state = syncState;
+    if (paired && hasError) {
+      bannerText.textContent = `Paired · Sync error: ${ms.lastError}`;
+    } else if (paired && ms.lastPublishedAt) {
+      const rel = formatRelativeTime(ms.lastPublishedAt);
+      bannerText.textContent = `Paired & syncing · Last pushed ${rel || 'just now'}`;
+    } else if (paired) {
+      bannerText.textContent = 'Paired · Waiting for first encrypted snapshot';
+    } else if (ms.lastStatus === 'revoke_warning' && hasError) {
+      bannerText.textContent = `Disconnected locally · ${ms.lastError}`;
+    } else {
+      bannerText.textContent = 'Disabled — enter your Cloudflare Worker URL to pair';
+    }
+  }
+
+  const urlInput = $('mobile-sync-relay-url');
+  const allowHttpInput = $('mobile-sync-allow-http');
+  const intervalSelect = $('mobile-sync-interval');
+  if (urlInput) {
+    urlInput.disabled = paired;
+    if (paired || (!urlInput.value && ms.relayUrl)) {
+      urlInput.value = ms.relayUrl || '';
+    }
+  }
+  if (allowHttpInput) {
+    allowHttpInput.disabled = paired;
+    if (paired) {
+      allowHttpInput.checked = Boolean(ms.allowLocalHttp);
+    }
+  }
+  if (intervalSelect && ms.syncIntervalSecs) {
+    const val = String(ms.syncIntervalSecs);
+    if ([...intervalSelect.options].some(o => o.value === val)) {
+      intervalSelect.value = val;
+    }
+  }
+
+  const pairingSection = $('mobile-sync-pairing-section');
+  const pairingTextarea = $('mobile-sync-pairing-json');
+  if (pairingSection && pairingTextarea) {
+    const showPayload = paired && ms.pairingPayload && typeof ms.pairingPayload === 'object';
+    pairingSection.hidden = !showPayload;
+    pairingTextarea.value = showPayload ? JSON.stringify(ms.pairingPayload) : '';
+  }
+
+  const enableBtn = $('mobile-sync-enable-btn');
+  const syncNowBtn = $('mobile-sync-sync-now-btn');
+  const rotateBtn = $('mobile-sync-rotate-btn');
+  const disconnectBtn = $('mobile-sync-disconnect-btn');
+  if (enableBtn) enableBtn.hidden = paired;
+  if (syncNowBtn) syncNowBtn.hidden = !paired;
+  if (rotateBtn) rotateBtn.hidden = !paired;
+  if (disconnectBtn) disconnectBtn.hidden = !paired;
+}
+
+async function loadMobileSyncStatus() {
+  try {
+    const status = await request('/api/mobile-sync');
+    if (status && typeof status === 'object') {
+      state.mobileSync = status;
+      syncMobileSyncUi();
+    }
+  } catch { /* Keep current local status if request fails. */ }
+}
+
+function openMobileSyncDialog() {
+  if (state.viewMode !== 'dashboard') setViewMode('dashboard');
+  mobileSyncMessage('');
+  syncMobileSyncUi();
+  loadMobileSyncStatus();
+  $('mobile-sync-dialog')?.showModal();
+}
+
+function setMobileSyncBusy(busy) {
+  for (const id of [
+    'mobile-sync-enable-btn',
+    'mobile-sync-sync-now-btn',
+    'mobile-sync-rotate-btn',
+    'mobile-sync-disconnect-btn',
+    'mobile-sync-interval'
+  ]) {
+    const el = $(id);
+    if (el) el.disabled = busy;
+  }
+}
+
+async function enableMobileSync() {
+  const relayUrl = $('mobile-sync-relay-url')?.value.trim() || '';
+  const allowLocalHttp = Boolean($('mobile-sync-allow-http')?.checked);
+  const syncIntervalSecs = Number($('mobile-sync-interval')?.value || 60);
+  mobileSyncMessage('');
+  setMobileSyncBusy(true);
+  try {
+    const res = await request('/api/mobile-sync/enable', {
+      method: 'POST',
+      body: JSON.stringify({ relayUrl, allowLocalHttp, syncIntervalSecs })
+    });
+    if (res.status) state.mobileSync = res.status;
+    syncMobileSyncUi();
+    if (res.syncError) {
+      mobileSyncMessage(`Room created and pairing JSON is ready, but initial snapshot upload failed: ${res.syncError}`, true);
+      showToast('Paired, but initial upload failed', 'warn');
+    } else {
+      mobileSyncMessage('');
+      showToast('Mobile companion paired & encrypted snapshot uploaded');
+    }
+  } catch (err) {
+    mobileSyncMessage(err.message, true);
+  } finally {
+    setMobileSyncBusy(false);
+  }
+}
+
+async function syncMobileNow() {
+  mobileSyncMessage('');
+  setMobileSyncBusy(true);
+  try {
+    const res = await request('/api/mobile-sync/sync-now', {
+      method: 'POST',
+      body: JSON.stringify({})
+    });
+    if (res.status) state.mobileSync = res.status;
+    syncMobileSyncUi();
+    showToast('Encrypted mobile snapshot uploaded');
+  } catch (err) {
+    await loadMobileSyncStatus();
+    mobileSyncMessage(err.message, true);
+    showToast(err.message, 'warn');
+  } finally {
+    setMobileSyncBusy(false);
+  }
+}
+
+async function rotateMobileSync() {
+  if (!await confirmAction({
+    title: 'Rotate mobile pairing keys?',
+    description: 'This revokes the current relay room and generates a brand-new room and encryption key. Any previously paired mobile device will need the new pairing JSON.',
+    confirmLabel: 'Rotate Keys'
+  })) return;
+
+  const syncIntervalSecs = Number($('mobile-sync-interval')?.value || 60);
+  mobileSyncMessage('');
+  setMobileSyncBusy(true);
+  try {
+    const res = await request('/api/mobile-sync/rotate', {
+      method: 'POST',
+      body: JSON.stringify({ syncIntervalSecs })
+    });
+    if (res.status) state.mobileSync = res.status;
+    syncMobileSyncUi();
+    const notes = [res.revokeWarning, res.syncError].filter(Boolean);
+    if (notes.length) {
+      mobileSyncMessage(notes.join(' '), true);
+      showToast('Keys rotated with warnings', 'warn');
+    } else {
+      showToast('Pairing keys rotated & new snapshot uploaded');
+    }
+  } catch (err) {
+    await loadMobileSyncStatus();
+    mobileSyncMessage(err.message, true);
+  } finally {
+    setMobileSyncBusy(false);
+  }
+}
+
+async function disconnectMobileSync() {
+  if (!await confirmAction({
+    title: 'Disconnect & revoke mobile pairing?',
+    description: 'Stops publishing snapshots, deletes the encrypted room on your relay, and clears local pairing keys.',
+    confirmLabel: 'Disconnect & Revoke',
+    destructive: true
+  })) return;
+
+  mobileSyncMessage('');
+  setMobileSyncBusy(true);
+  try {
+    const res = await request('/api/mobile-sync/disconnect', {
+      method: 'POST',
+      body: JSON.stringify({})
+    });
+    if (res.status) state.mobileSync = res.status;
+    syncMobileSyncUi();
+    if (res.remoteDeleted) {
+      mobileSyncMessage('Disconnected. Remote relay room deleted and local pairing credentials cleared.', false);
+      showToast('Mobile companion disconnected & remote room deleted');
+    } else {
+      const warnText = res.warning || 'Disconnected locally and cleared pairing credentials, but remote relay deletion could not be confirmed.';
+      mobileSyncMessage(warnText, true);
+      showToast('Disconnected locally; remote delete not confirmed', 'warn');
+    }
+  } catch (err) {
+    await loadMobileSyncStatus();
+    mobileSyncMessage(err.message, true);
+  } finally {
+    setMobileSyncBusy(false);
+  }
+}
+
+async function updateMobileSyncInterval(secs) {
+  try {
+    const res = await request('/api/mobile-sync/settings', {
+      method: 'POST',
+      body: JSON.stringify({ syncIntervalSecs: secs })
+    });
+    if (res.status) state.mobileSync = res.status;
+    syncMobileSyncUi();
+    showToast(`Mobile snapshot interval set to ${secs}s`);
+  } catch (err) {
+    mobileSyncMessage(err.message, true);
+  }
+}
+
+function liveShareMessage(message, isError = false) {
+  const el = $('live-share-message');
+  if (!el) return;
+  el.hidden = !message;
+  el.textContent = message ? String(message) : '';
+  el.classList.toggle('error', Boolean(isError));
+}
+
+function renderLiveShareQr(qrMatrix) {
+  const canvas = $('live-share-qr-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  if (!qrMatrix || !Array.isArray(qrMatrix.rows) || !qrMatrix.size) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    return;
+  }
+
+  const size = Number(qrMatrix.size);
+  const quiet = 2;
+  const totalModules = size + quiet * 2;
+  const scale = Math.max(2, Math.floor(216 / totalModules));
+  const px = totalModules * scale;
+  if (canvas.width !== px || canvas.height !== px) {
+    canvas.width = px;
+    canvas.height = px;
+  }
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, px, px);
+  ctx.fillStyle = '#000000';
+  for (let r = 0; r < size; r++) {
+    const row = qrMatrix.rows[r] || '';
+    for (let c = 0; c < size; c++) {
+      if (row.charCodeAt(c) === 49) {
+        ctx.fillRect((c + quiet) * scale, (r + quiet) * scale, scale, scale);
+      }
+    }
+  }
+}
+
+function syncLiveShareUi() {
+  const ls = state.liveShare || {};
+  const enabled = Boolean(ls.enabled);
+  const connected = enabled && Boolean(ls.connected);
+  const configured = Boolean(ls.configured);
+  const status = enabled
+    ? (connected ? 'live' : (ls.status === 'connecting' ? 'connecting' : 'reconnecting'))
+    : 'disabled';
+
+  const topBtn = $('open-live-share-btn');
+  const topLabel = $('live-share-btn-label');
+  if (topBtn) {
+    topBtn.setAttribute('aria-pressed', String(enabled));
+    topBtn.dataset.liveState = status;
+    if (connected) {
+      topBtn.title = 'Live Browser Share active (click to view link & QR or disable)';
+    } else if (enabled && status === 'connecting') {
+      topBtn.title = 'Live Browser Share connecting to relay…';
+    } else if (enabled) {
+      topBtn.title = ls.lastError ? `Live Browser Share disconnected: ${ls.lastError}` : 'Live Browser Share reconnecting…';
+    } else {
+      topBtn.title = 'Live Browser Share — End-to-End Encrypted Read-Only Live Stream';
+    }
+  }
+  if (topLabel) {
+    topLabel.textContent = connected
+      ? 'Live On'
+      : (enabled ? (status === 'connecting' ? 'Live Connecting' : 'Live Offline') : 'Live Off');
+  }
+
+  const vaultBtn = $('vault-live-share-btn');
+  if (vaultBtn) {
+    vaultBtn.setAttribute('aria-pressed', String(enabled));
+    vaultBtn.textContent = connected ? 'Live On' : (enabled ? 'Live Reconnecting' : 'Live Share');
+  }
+
+  const banner = $('live-share-status-banner');
+  const bannerText = $('live-share-status-text');
+  if (banner && bannerText) {
+    banner.dataset.state = status;
+    if (connected) {
+      const rel = ls.lastPublishedAt ? (formatRelativeTime(ls.lastPublishedAt) || 'just now') : 'just now';
+      const guests = ls.guestEvents > 0 ? ` · ${ls.guestEvents} viewer join${ls.guestEvents === 1 ? '' : 's'}` : '';
+      bannerText.textContent = `Live · Connected to relay · Last pushed ${rel}${guests}`;
+    } else if (enabled && status === 'connecting') {
+      bannerText.textContent = 'Connecting to live relay… (not live until handshake succeeds)';
+    } else if (enabled) {
+      const errDetail = ls.lastError ? ` (${ls.lastError})` : '';
+      bannerText.textContent = `Offline / Reconnecting${errDetail} — Snapshots are not live while disconnected.`;
+    } else if (ls.autoStartError) {
+      bannerText.textContent = `Live Share startup error: ${ls.autoStartError}`;
+    } else if (!configured) {
+      bannerText.textContent = 'Unavailable — shared relay URL is not configured in this build yet.';
+    } else {
+      bannerText.textContent = 'Off — sharing stays off until you start it again.';
+    }
+  }
+
+  const configCallout = $('live-share-config-callout');
+  const configTitle = $('live-share-config-title');
+  const configText = $('live-share-config-text');
+  if (configCallout && configTitle && configText) {
+    configCallout.dataset.configured = String(configured);
+    if (configured) {
+      configTitle.textContent = 'Shared Relay Configured';
+      configText.textContent = ls.usingOverride
+        ? 'Live Share is using a custom relay.'
+        : 'Live Share is using the configured shared relay.';
+    } else if (ls.configError) {
+      configTitle.textContent = 'Shared Relay Configuration Invalid';
+      configText.textContent = `Operator CHALZ_LIVE_RELAY_URL is invalid (${ls.configError}). Use Developer options below to test a valid HTTPS relay URL.`;
+    } else {
+      configTitle.textContent = 'Relay URL Required Until Deployed';
+      configText.textContent = 'No shared relay URL is configured in this build yet. Once the operator deploys relay/ and builds with CHALZ_LIVE_RELAY_URL, one-click Live Share will work automatically. For local testing, expand Developer options below.';
+    }
+  }
+
+  const urlInput = $('live-share-relay-url');
+  const allowHttpInput = $('live-share-allow-http');
+  if (urlInput) {
+    urlInput.disabled = enabled;
+    if (enabled && ls.usingOverride) {
+      urlInput.value = ls.relayUrl || '';
+    }
+  }
+  if (allowHttpInput) {
+    allowHttpInput.disabled = enabled;
+    if (enabled) {
+      allowHttpInput.checked = Boolean(ls.allowLocalHttp);
+    }
+  }
+
+  const linkSection = $('live-share-link-section');
+  const linkInput = $('live-share-link-input');
+  if (linkSection && linkInput) {
+    const showLink = enabled && typeof ls.shareUrl === 'string' && ls.shareUrl.length > 0;
+    linkSection.hidden = !showLink;
+    linkInput.value = showLink ? ls.shareUrl : '';
+    renderLiveShareQr(showLink ? ls.qrMatrix : null);
+  }
+
+  const hasOverride = Boolean(urlInput?.value.trim());
+  const enableBtn = $('live-share-enable-btn');
+  const syncNowBtn = $('live-share-sync-now-btn');
+  const rotateBtn = $('live-share-rotate-btn');
+  const disableBtn = $('live-share-disable-btn');
+  if (enableBtn) {
+    enableBtn.hidden = enabled;
+    enableBtn.disabled = !enabled && !configured && !hasOverride;
+  }
+  if (syncNowBtn) {
+    syncNowBtn.hidden = !enabled;
+    syncNowBtn.disabled = !connected;
+  }
+  if (rotateBtn) rotateBtn.hidden = !enabled;
+  if (disableBtn) disableBtn.hidden = !enabled;
+}
+
+async function loadLiveShareStatus() {
+  try {
+    const status = await request('/api/live-share');
+    if (status && typeof status === 'object') {
+      state.liveShare = status;
+      syncLiveShareUi();
+    }
+  } catch { /* Keep current local status if request fails. */ }
+}
+
+function openLiveShareDialog() {
+  if (state.viewMode !== 'dashboard') setViewMode('dashboard');
+  liveShareMessage('');
+  syncLiveShareUi();
+  loadLiveShareStatus();
+  $('live-share-dialog')?.showModal();
+}
+
+function setLiveShareBusy(busy) {
+  for (const id of [
+    'live-share-enable-btn',
+    'live-share-sync-now-btn',
+    'live-share-rotate-btn',
+    'live-share-disable-btn'
+  ]) {
+    const el = $(id);
+    if (el) el.disabled = busy;
+  }
+  if (!busy) syncLiveShareUi();
+}
+
+async function enableLiveShare() {
+  const overrideUrl = $('live-share-relay-url')?.value.trim() || '';
+  const allowLocalHttp = Boolean($('live-share-allow-http')?.checked);
+  const body = overrideUrl ? { relayUrl: overrideUrl, allowLocalHttp } : {};
+  liveShareMessage('');
+  setLiveShareBusy(true);
+  try {
+    const res = await request('/api/live-share/enable', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    });
+    if (res.status) state.liveShare = res.status;
+    syncLiveShareUi();
+    showToast('Live Browser Share started — link & QR ready');
+  } catch (err) {
+    liveShareMessage(err.message, true);
+  } finally {
+    setLiveShareBusy(false);
+  }
+}
+
+async function pushLiveShareNow() {
+  liveShareMessage('');
+  setLiveShareBusy(true);
+  try {
+    const res = await request('/api/live-share/sync-now', {
+      method: 'POST',
+      body: JSON.stringify({})
+    });
+    if (res.status) state.liveShare = res.status;
+    syncLiveShareUi();
+    showToast('Encrypted live snapshot pushed');
+  } catch (err) {
+    await loadLiveShareStatus();
+    liveShareMessage(err.message, true);
+    showToast(err.message, 'warn');
+  } finally {
+    setLiveShareBusy(false);
+  }
+}
+
+async function rotateLiveShare() {
+  if (!await confirmAction({
+    title: 'Rotate live room & encryption key?',
+    description: 'This closes the current live room (marking any connected browser viewers offline) and generates a fresh room ID, AES-256-GCM key, and companion link.',
+    confirmLabel: 'Rotate Link'
+  })) return;
+
+  const overrideUrl = $('live-share-relay-url')?.value.trim() || '';
+  const allowLocalHttp = Boolean($('live-share-allow-http')?.checked);
+  const body = overrideUrl ? { relayUrl: overrideUrl, allowLocalHttp } : {};
+  liveShareMessage('');
+  setLiveShareBusy(true);
+  try {
+    const res = await request('/api/live-share/rotate', {
+      method: 'POST',
+      body: JSON.stringify(body)
+    });
+    if (res.status) state.liveShare = res.status;
+    syncLiveShareUi();
+    showToast('Live share room & key rotated');
+  } catch (err) {
+    await loadLiveShareStatus();
+    liveShareMessage(err.message, true);
+  } finally {
+    setLiveShareBusy(false);
+  }
+}
+
+async function disableLiveShare() {
+  if (!await confirmAction({
+    title: 'Disable Live Browser Share?',
+    description: 'Closes the active relay connection and disables automatic sharing until you start it again.',
+    confirmLabel: 'Disable',
+    destructive: true
+  })) return;
+
+  liveShareMessage('');
+  setLiveShareBusy(true);
+  try {
+    const res = await request('/api/live-share/disable', {
+      method: 'POST',
+      body: JSON.stringify({})
+    });
+    if (res.status) state.liveShare = res.status;
+    syncLiveShareUi();
+    if (res.status?.autoStartError) {
+      liveShareMessage(`Sharing stopped, but automatic startup could not be disabled: ${res.status.autoStartError}`, true);
+      showToast('Sharing stopped; startup preference could not be saved', 'warn');
+    } else {
+      liveShareMessage('Live Browser Share disabled, including automatic startup.', false);
+      showToast('Live Browser Share disabled');
+    }
+  } catch (err) {
+    await loadLiveShareStatus();
+    liveShareMessage(err.message, true);
+  } finally {
+    setLiveShareBusy(false);
+  }
+}
+
 async function redeemBankedReset(account) {
   if (!account || !account.bankedResets || account.bankedResets.count <= 0) return;
   const lbl = accountLabel(account);
@@ -758,28 +1326,183 @@ async function redeemBankedReset(account) {
   }
 }
 
+function parseTimeMs(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const ms = new Date(value).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function formatBankedCountdown(targetMs, nowMs = Date.now()) {
+  if (typeof targetMs !== 'number' || !Number.isFinite(targetMs)) return '';
+  const diffMs = targetMs - nowMs;
+  if (diffMs <= 0) return 'Expired';
+  const totalSec = Math.ceil(diffMs / 1000);
+  const days = Math.floor(totalSec / 86400);
+  const hours = Math.floor((totalSec % 86400) / 3600);
+  const mins = Math.floor((totalSec % 3600) / 60);
+  const secs = totalSec % 60;
+  const pad2 = n => String(n).padStart(2, '0');
+  if (days > 0) return `in ${days}d ${hours}h ${pad2(mins)}m ${pad2(secs)}s`;
+  if (hours > 0) return `in ${hours}h ${pad2(mins)}m ${pad2(secs)}s`;
+  if (mins > 0) return `in ${mins}m ${pad2(secs)}s`;
+  return `in ${secs}s`;
+}
+
+function updateBankedCountdowns(nowMs = Date.now()) {
+  const targets = document.querySelectorAll('[data-banked-expires-ms]');
+  for (const el of targets) {
+    const targetMs = Number(el.dataset.bankedExpiresMs);
+    if (!Number.isFinite(targetMs)) continue;
+    const nextText = formatBankedCountdown(targetMs, nowMs);
+    if (el.textContent !== nextText) el.textContent = nextText;
+    const stateName = targetMs <= nowMs ? 'expired' : (targetMs - nowMs <= 48 * 3600_000 ? 'expiring' : 'active');
+    if (el.dataset.state !== stateName) el.dataset.state = stateName;
+    const row = el.closest('.banked-credit-row');
+    if (row) {
+      row.classList.toggle('is-expired', stateName === 'expired');
+      row.classList.toggle('is-expiring', stateName === 'expiring');
+    }
+  }
+}
+
+function buildBankedCreditRow({ label, expiresAt, grantedAt, isUnknown = false, isAggregate = false, nowMs = Date.now() }) {
+  const row = node('div', `banked-credit-row${isUnknown ? ' is-unknown' : ''}${isAggregate ? ' is-aggregate' : ''}`);
+  const meta = node('div', 'banked-credit-meta');
+  const titleLine = node('div', 'banked-credit-main');
+  if (label) titleLine.append(node('span', 'banked-credit-label', label));
+
+  const expMs = parseTimeMs(expiresAt);
+  const expText = expMs !== null ? formatDate(expMs) : null;
+  if (expText) {
+    titleLine.append(node('span', 'banked-credit-date', isAggregate ? expText : `Expires ${expText}`));
+  } else {
+    titleLine.append(node('span', 'banked-credit-missing', 'Expiry not provided'));
+  }
+  meta.append(titleLine);
+
+  const grantedMs = parseTimeMs(grantedAt);
+  const grantedText = grantedMs !== null ? formatDate(grantedMs) : null;
+  if (grantedText) {
+    meta.append(node('span', 'banked-credit-granted', `Granted ${grantedText}`));
+  }
+
+  row.append(meta);
+
+  if (expMs !== null) {
+    const stateName = expMs <= nowMs ? 'expired' : (expMs - nowMs <= 48 * 3600_000 ? 'expiring' : 'active');
+    if (stateName === 'expired') row.classList.add('is-expired');
+    else if (stateName === 'expiring') row.classList.add('is-expiring');
+    const countdown = node('span', 'banked-credit-countdown', formatBankedCountdown(expMs, nowMs));
+    countdown.dataset.bankedExpiresMs = String(expMs);
+    countdown.dataset.state = stateName;
+    row.append(countdown);
+  }
+  return row;
+}
+
 function buildBankedResetStrip(account) {
   const b = account?.bankedResets;
-  if (!b || typeof b.count !== 'number' || b.count <= 0) return null;
-  const bar = node('div', `banked-bar${b.expiringSoon ? ' expiring' : ''}`);
+  if (!b || typeof b.count !== 'number' || !Number.isFinite(b.count) || b.count <= 0) return null;
+
+  const nowMs = Date.now();
+  const count = b.count;
+  const rawItems = Array.isArray(b.items) ? b.items : [];
+  const items = rawItems
+    .filter(item => item && typeof item === 'object' && !Array.isArray(item))
+    .map(item => ({
+      expiresAt: parseTimeMs(item.expiresAt),
+      grantedAt: parseTimeMs(item.grantedAt)
+    }));
+  const earliestMs = parseTimeMs(b.earliestExpiresAt);
+  const anyItemExpiringSoon = items.some(it => it.expiresAt !== null && it.expiresAt > nowMs && (it.expiresAt - nowMs) <= 48 * 3600_000);
+  const earliestExpiringSoon = earliestMs !== null && earliestMs > nowMs && (earliestMs - nowMs) <= 48 * 3600_000;
+  const isExpiring = Boolean(b.expiringSoon || anyItemExpiringSoon || earliestExpiringSoon);
+
+  const bar = node('div', `banked-bar${isExpiring ? ' expiring' : ''}`);
+  const header = node('div', 'banked-bar-head');
   const copy = node('div', 'banked-bar-copy');
   copy.append(
-    node('strong', '', `${b.count} Banked Reset${b.count > 1 ? 's' : ''} Available`)
+    node('strong', '', `${count} Banked Reset${count === 1 ? '' : 's'} Available`)
   );
-  const expRel = b.earliestExpiresAt ? formatRelativeTime(b.earliestExpiresAt) : null;
-  const subText = expRel
-    ? (b.expiringSoon ? `Expires ${expRel} — redeem before it lapses` : `Earliest expires ${expRel}`)
-    : 'Saved reset credit in reserve';
-  copy.append(node('span', '', subText));
-  bar.append(copy);
+  if (isExpiring) {
+    copy.append(node('span', 'banked-bar-warn', 'Expiring soon — redeem before it lapses'));
+  }
+  header.append(copy);
 
   if (b.redeemable) {
     const btn = node('button', 'redeem-reset-btn', state.busy.has(account.id) ? 'Redeeming…' : 'Redeem Reset');
     btn.type = 'button';
     btn.disabled = state.loading || state.busy.has(account.id);
     btn.addEventListener('click', () => redeemBankedReset(account));
-    bar.append(btn);
+    header.append(btn);
   }
+  bar.append(header);
+
+  const list = node('div', 'banked-credit-list');
+  const missingCount = Math.max(0, Math.round(count) - items.length);
+
+  if (items.length > 0) {
+    const singleCredit = count === 1 && items.length === 1;
+    items.forEach((item, idx) => {
+      const label = singleCredit
+        ? (item.expiresAt === null && item.grantedAt !== null ? 'Credit 1' : '')
+        : `Credit ${idx + 1}`;
+      list.append(buildBankedCreditRow({
+        label,
+        expiresAt: item.expiresAt,
+        grantedAt: item.grantedAt,
+        isUnknown: item.expiresAt === null,
+        nowMs
+      }));
+    });
+    const anyItemHasExpiry = items.some(it => it.expiresAt !== null);
+    if (!anyItemHasExpiry && earliestMs !== null) {
+      list.append(buildBankedCreditRow({
+        label: 'Earliest expiry (aggregate)',
+        expiresAt: earliestMs,
+        grantedAt: null,
+        isAggregate: true,
+        nowMs
+      }));
+    }
+    if (missingCount > 0) {
+      list.append(buildBankedCreditRow({
+        label: `${missingCount} additional credit${missingCount === 1 ? '' : 's'}`,
+        expiresAt: null,
+        grantedAt: null,
+        isUnknown: true,
+        nowMs
+      }));
+    }
+  } else if (earliestMs !== null) {
+    list.append(buildBankedCreditRow({
+      label: count > 1 ? 'Earliest expiry (aggregate)' : 'Earliest expiry',
+      expiresAt: earliestMs,
+      grantedAt: null,
+      isAggregate: true,
+      nowMs
+    }));
+    if (count > 1) {
+      list.append(buildBankedCreditRow({
+        label: `Individual credit expiries (${count} credits)`,
+        expiresAt: null,
+        grantedAt: null,
+        isUnknown: true,
+        nowMs
+      }));
+    }
+  } else {
+    list.append(buildBankedCreditRow({
+      label: count > 1 ? `${count} credits` : '',
+      expiresAt: null,
+      grantedAt: null,
+      isUnknown: true,
+      nowMs
+    }));
+  }
+
+  bar.append(list);
   return bar;
 }
 
@@ -787,10 +1510,26 @@ function buildBankedResetStrip(account) {
    CORE API & FORMATTING HELPERS
    ============================================================================ */
 
+// The capability is issued only to the authorized Tauri window and stays in memory.
+let apiCapabilityPromise;
+function apiCapability() {
+  if (!apiCapabilityPromise) {
+    apiCapabilityPromise = Promise.resolve().then(() => {
+      if (!window.__TAURI_INTERNALS__?.invoke) throw new Error('Desktop API unavailable.');
+      return window.__TAURI_INTERNALS__.invoke('window_action', { action: 'api-capability' });
+    }).then(token => {
+      if (typeof token !== 'string' || !token) throw new Error('Desktop API unavailable.');
+      return token;
+    }).catch(error => { apiCapabilityPromise = null; throw error; });
+  }
+  return apiCapabilityPromise;
+}
+
 async function request(path, options = {}) {
+  const capability = await apiCapability();
   const response = await fetch(path, {
     ...options,
-    headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers }
+    headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers, 'X-Chalz-Capability': capability }
   });
   let data;
   try { data = await response.json(); } catch { throw new Error(`Request failed (${response.status}).`); }
@@ -3163,6 +3902,8 @@ function getCommands() {
     { label: 'Refresh all connected accounts', meta: 'Shortcut: R', action: () => refreshAccounts() },
     { label: 'Notification Settings (Usage Reset & Quota Alerts)', meta: 'Shortcut: N', action: openAlertsDialog },
     { label: 'Send Test AI Logo Notification', meta: 'Desktop Alert', action: sendTestResetNotification },
+    { label: 'Mobile Companion (Encrypted Relay Sync)', meta: 'Sync', action: openMobileSyncDialog },
+    { label: 'Live Browser Share (E2E Encrypted WebSocket)', meta: 'Share', action: openLiveShareDialog },
     { label: state.settings?.alertsEnabled !== false ? 'Mute all desktop notifications' : 'Enable all desktop notifications', meta: 'Alerts', action: toggleAlertsSetting },
     { label: state.showRemaining ? 'Show quota as Used %' : 'Show quota as Remaining %', meta: 'Toggle', action: () => $('quota-mode-toggle')?.click() },
     { label: 'Export All Account Quotas to CSV', meta: 'Export', action: exportFleetCsv }
@@ -3293,6 +4034,50 @@ $('preview-alert-sound-btn')?.addEventListener('click', () => {
   playNotificationSound(pack, 'reset');
 });
 $('test-reset-alert-btn')?.addEventListener('click', sendTestResetNotification);
+$('open-mobile-sync-btn')?.addEventListener('click', openMobileSyncDialog);
+$('vault-mobile-sync-btn')?.addEventListener('click', openMobileSyncDialog);
+$('close-mobile-sync-dialog')?.addEventListener('click', () => $('mobile-sync-dialog')?.close());
+$('done-mobile-sync-dialog')?.addEventListener('click', () => $('mobile-sync-dialog')?.close());
+$('mobile-sync-enable-btn')?.addEventListener('click', enableMobileSync);
+$('mobile-sync-sync-now-btn')?.addEventListener('click', syncMobileNow);
+$('mobile-sync-rotate-btn')?.addEventListener('click', rotateMobileSync);
+$('mobile-sync-disconnect-btn')?.addEventListener('click', disconnectMobileSync);
+$('mobile-sync-interval')?.addEventListener('change', e => {
+  if (state.mobileSync?.paired) {
+    updateMobileSyncInterval(Number(e.target.value));
+  }
+});
+$('mobile-sync-copy-btn')?.addEventListener('click', e => {
+  const textarea = $('mobile-sync-pairing-json');
+  const text = textarea?.value || '';
+  if (!text) return;
+  textarea.focus();
+  textarea.select();
+  copyText(text, e.currentTarget, 'Pairing JSON copied to clipboard');
+});
+$('mobile-sync-pairing-json')?.addEventListener('focus', e => e.currentTarget.select());
+$('mobile-sync-pairing-json')?.addEventListener('click', e => e.currentTarget.select());
+
+// Live Browser Share Dialog Listeners
+$('open-live-share-btn')?.addEventListener('click', openLiveShareDialog);
+$('vault-live-share-btn')?.addEventListener('click', openLiveShareDialog);
+$('close-live-share-dialog')?.addEventListener('click', () => $('live-share-dialog')?.close());
+$('done-live-share-dialog')?.addEventListener('click', () => $('live-share-dialog')?.close());
+$('live-share-enable-btn')?.addEventListener('click', enableLiveShare);
+$('live-share-sync-now-btn')?.addEventListener('click', pushLiveShareNow);
+$('live-share-rotate-btn')?.addEventListener('click', rotateLiveShare);
+$('live-share-disable-btn')?.addEventListener('click', disableLiveShare);
+$('live-share-relay-url')?.addEventListener('input', syncLiveShareUi);
+$('live-share-copy-btn')?.addEventListener('click', e => {
+  const input = $('live-share-link-input');
+  const text = input?.value || '';
+  if (!text) return;
+  input.focus();
+  input.select();
+  copyText(text, e.currentTarget, 'Private live companion link copied');
+});
+$('live-share-link-input')?.addEventListener('focus', e => e.currentTarget.select());
+$('live-share-link-input')?.addEventListener('click', e => e.currentTarget.select());
 
 // UI & Sound Customization Studio Listeners
 $('open-customize-btn')?.addEventListener('click', openCustomizeDialog);
@@ -3656,7 +4441,7 @@ $('help-open-add')?.addEventListener('click', () => {
 $('close-command-dialog')?.addEventListener('click', () => $('command-dialog')?.close());
 $('open-command')?.addEventListener('click', openCommandPalette);
 
-for (const dlgId of ['add-dialog', 'omp-help-dialog', 'alerts-dialog', 'customize-dialog', 'command-dialog']) {
+for (const dlgId of ['add-dialog', 'omp-help-dialog', 'alerts-dialog', 'customize-dialog', 'mobile-sync-dialog', 'live-share-dialog', 'command-dialog']) {
   const dlg = document.getElementById(dlgId);
   dlg?.addEventListener('click', e => {
     if (e.target === dlg) dlg.close();
@@ -3748,6 +4533,7 @@ $('toggle-poll')?.addEventListener('click', () => {
 setInterval(() => {
   const currentEligibility = JSON.stringify(state.accounts.filter(account => routerEligible(account)).map(account => account.id));
   if (currentEligibility !== routerEligibilitySignature) render();
+  updateBankedCountdowns();
   updateSyncStatus();
   if (state.pollPaused) return;
   state.pollSecondsLeft--;
@@ -3773,12 +4559,36 @@ request('/api/tray').then(res => {
   if (typeof res.topmost === 'boolean') syncTopmostUi(res.topmost);
 }).catch(() => {});
 
-// Subscribe to native SSE events (Window mode, System Tray, Live OAuth completion, Threshold Alerts)
-try {
-  const winEvents = new EventSource('/api/window/events');
-  winEvents.addEventListener('message', e => {
+// Fetch supports the capability header that EventSource cannot send. Reconnect on
+// disconnect, as EventSource did, without placing the capability in a URL.
+async function subscribeWindowEvents() {
+  while (true) {
     try {
-      const data = JSON.parse(e.data);
+      const capability = await apiCapability();
+      const response = await fetch('/api/window/events', { headers: { 'X-Chalz-Capability': capability }, cache: 'no-store' });
+      if (!response.ok || !response.body) throw new Error('Event stream unavailable');
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let boundary;
+        while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+          const frame = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const data = frame.split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n');
+          if (data) handleWindowEvent(data);
+        }
+      }
+    } catch { /* retry after disconnect */ }
+    await new Promise(resolve => setTimeout(resolve, 3000));
+  }
+}
+function handleWindowEvent(message) {
+    try {
+      const data = JSON.parse(message);
       if (data.type === 'mode' && ['dashboard', 'widget', 'pill'].includes(data.mode)) {
         setViewMode(data.mode, false, false);
         if (typeof data.topmost === 'boolean') syncTopmostUi(data.topmost);
@@ -3792,10 +4602,18 @@ try {
       } else if (data.type === 'accounts_updated') {
         loadAccounts();
         loadAnalytics();
+      } else if (data.type === 'mobile_sync_updated' && data.status) {
+        state.mobileSync = data.status;
+        syncMobileSyncUi();
+      } else if (data.type === 'live_share_updated' && data.status) {
+        state.liveShare = data.status;
+        syncLiveShareUi();
       }
     } catch { /* ignore */ }
-  });
-} catch { /* ignore */ }
+}
+subscribeWindowEvents();
 
 loadAccounts();
 loadAnalytics();
+loadMobileSyncStatus();
+loadLiveShareStatus();

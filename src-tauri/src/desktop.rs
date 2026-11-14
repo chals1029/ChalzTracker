@@ -175,8 +175,13 @@ fn apply_mode(window: &WebviewWindow, mode: &str, dims: Dimensions, sync: bool) 
     Ok(())
 }
 #[tauri::command]
-pub async fn window_action(window: WebviewWindow, action: &str) -> Result<(), String> {
+pub async fn window_action(window: WebviewWindow, action: &str) -> Result<Option<String>, String> {
     authorize(&window)?;
+    if action == "api-capability" {
+        let backend = window.state::<Mutex<crate::backend::BackendHandle>>();
+        let backend = backend.lock().map_err(|_| "Backend unavailable")?;
+        return Ok(Some(backend.api_token().to_owned()));
+    }
     match action {
         "minimize" => window.minimize(),
         "maximize" => if window.is_maximized().map_err(|e| e.to_string())? { window.unmaximize() } else { window.maximize() },
@@ -191,7 +196,7 @@ pub async fn window_action(window: WebviewWindow, action: &str) -> Result<(), St
             Ok(())
         },
         _ => return Err("Invalid window action".into()),
-    }.map_err(|e| e.to_string())
+    }.map(|_| None).map_err(|e| e.to_string())
 }
 
 pub fn native_route(app: &tauri::AppHandle, route: &str, body: &Value, result: &Value) -> Result<(), String> {

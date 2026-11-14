@@ -10,24 +10,15 @@ ChalzTracker is an open-source Windows desktop app for monitoring AI subscriptio
 
 ## Features
 
-- **Multi-account monitoring:** Connect multiple accounts and view usage, remaining quota, and reset times in the Usage tab.
-- **Smart Account Router:** Choose balanced, capacity, soonest eligible reset, or pinned-account priority and see why an account was recommended. Providers without an eligible account appear below the recommendations. Open the provider from an account card or copy an email after revealing it.
-- **Analytics and reset timeline:** Review local usage history and filter upcoming resets to the next hour, today, or seven days.
-- **Private usage summary:** Copy a shareable summary without account names or email addresses.
-- **Compact desktop modes:** Switch to a widget with provider details or a draggable, always-on-top mini button. During the app session, switching providers restores each provider's manually selected account, including in the inline dashboard view. Providers without a manual selection use the best available account.
-- **Notifications and system tray:** Receive configurable usage and reset alerts, including banked reset credits when Claude or OpenAI Codex reports them. Credit availability depends on the provider; unknown data is not treated as zero. The tray menu shows an anonymous balanced recommendation, remaining quota, and next reset when fresh data is available. Closing the desktop window hides it to the tray.
-- **Startup reveal:** A brief logo animation plays when the app starts in dashboard mode. It is skipped when reduced motion is enabled.
-- **Appearance themes:** **AMOLED is the default.** Open **Customize > Theme** to choose **AMOLED** (pure black, retaining your chosen accent), **Website**, **Midnight** (navy and icy blue), **Graphite** (charcoal and silver), **Paper** (light surfaces and dark text), or **Warm dusk** (warm charcoal and amber). Lower opacity for a translucent backdrop without a separate glass theme. Themes apply to the dashboard, compact widget, and mini button; header buttons stay together at desktop widths and wrap in narrow windows. Saved Liquid glass selections migrate to AMOLED without changing other preferences. Customize the accent, layout, background picture, opacity, and notification sounds; preferences are saved locally.
-- **Account privacy:** Emails are hidden by default. Reveal or hide them per account or across the Usage tab and Account Vault.
-- **Account Vault:** Rename, tag, pin, pause, and manage connected accounts. Account data and settings are stored locally in `~/.chalztracker`.
+- Monitor multiple accounts, usage windows, and reset times.
+- Find available accounts with Smart Account Router.
+- Review usage history and upcoming resets.
+- Use the compact widget, mini button, and system tray.
+- Receive usage and reset notifications.
+- Customize the app's appearance and sounds.
+- View usage from a phone or browser with Live Share.
 
-## Built with Rust
-
-ChalzTracker is a native app: a Rust backend with the WebView2 runtime built into Windows. The installer is a 4.7 MB download, and the installed app takes 19 MB.
-
-- **Native backend:** Provider requests, token refresh, alerts, and local storage run in one Rust process, which used about 14 MB of private memory in our measurement.
-- **No bundled browser:** The interface is drawn by the Microsoft Edge WebView2 runtime that ships with Windows 10 and 11, rather than a copy of Chromium inside the app. WebView2 accounts for most of the app's memory use; the whole app used about 180 MB of private memory in the same measurement. Memory use varies with your system and connected accounts.
-- **Light background work:** Usage refreshes reuse one connection pool, and the app checks for updates and Google subscription plans only every six hours.
+ChalzTracker is built with Rust and Tauri and uses the Windows WebView2 runtime.
 
 ## Supported providers
 
@@ -83,19 +74,27 @@ Use **W** to open the compact widget or **M** for the mini button. The app also 
 
 ### Updates
 
-**GitHub installer:** While ChalzTracker runs, it checks for a new version when it starts and every six hours after that. When one is available, you get a Windows notification and an **Update** button appears in the app. Click it, and ChalzTracker downloads the update, installs it, and restarts itself. Update checks contact GitHub Releases, which can see your IP address. The updater verifies each update's signature against the public key built into ChalzTracker before installing, and keeps your locally stored accounts and settings.
+GitHub installations can update from within the app. Microsoft Store installations update through the Store.
 
-**Microsoft Store:** Updates are delivered through Microsoft Store. This edition does not use the GitHub installer or its in-app updater.
+## Live browser sharing
+
+Open **Live Share** in the desktop app, then scan the QR code or copy the private link. Keep the desktop app running while viewing usage. The browser view is read-only.
+
+Treat the link and QR code as private. You can disable sharing or rotate the link in the desktop app. A new link is created whenever the app restarts.
+
+## Mobile companion
+
+The optional mobile companion provides another read-only view of your usage. See [mobile/README.md](mobile/README.md) for setup instructions.
 
 ## Development
 
-The desktop app lives in `src-tauri`: the Rust backend is in `src-tauri/src`, and the web interface (`index.html`, `app.js`, `styles.css`, `assets`) is bundled from the repository root. The app reads the `~/.chalztracker` data directory; set `CHALZTRACKER_HOME` to an isolated directory when testing so your real accounts are not touched.
+The desktop app lives in `src-tauri`; the interface is in the repository root. On Windows, install Rust, the Microsoft C++ build tools, WebView2, and Node.js, then run:
 
-On Windows, install Rust, the Microsoft C++ build tools, WebView2 and Node.js, then run `npx @tauri-apps/cli@2 dev` from the checkout. Run the Rust tests with `cargo test --manifest-path src-tauri/Cargo.toml`.
+```sh
+npx @tauri-apps/cli@2 dev
+```
 
-Release builds need `CHALZ_ANTIGRAVITY_CLIENT_ID` and `CHALZ_ANTIGRAVITY_CLIENT_SECRET` in the build process environment for Google Antigravity sign-in. Load the local `~/.tauri/chalztracker-build.env` before invoking Cargo or Tauri; do not commit that file. GitHub installer builds also need the existing `TAURI_SIGNING_PRIVATE_KEY` and its password to produce updater signatures. Build without the `store` feature for the `.exe` installer, and with `--features store` for Microsoft Store.
-
-For Microsoft Store packages, build with `cargo build --release --features store --manifest-path src-tauri/Cargo.toml`, then run `src-tauri/store/package.ps1` in PowerShell. The script packages the release binary and frontend into an unsigned x64 MSIX for Partner Center, using the version in `src-tauri/tauri.conf.json` with a final `.0` component. Install the Windows SDK for `MakeAppx.exe`; Microsoft signs the package during Store processing.
+Run the Rust tests with `cargo test --manifest-path src-tauri/Cargo.toml`. Use an isolated `CHALZTRACKER_HOME` when testing to avoid changing your personal data. Release builds may require additional provider and signing configuration; keep credentials out of the repository.
 
 The installer pages are a customized NSIS template; see [src-tauri/installer/README.md](src-tauri/installer/README.md).
 

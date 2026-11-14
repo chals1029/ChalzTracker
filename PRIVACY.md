@@ -1,6 +1,6 @@
 # ChalzTracker Privacy Policy
 
-Last updated: November 10, 2026
+Last updated: November 14, 2026
 
 ChalzTracker is a Windows app that displays usage information for AI accounts you choose to connect.
 
@@ -18,7 +18,17 @@ ChalzTracker communicates with the AI providers you choose to connect to authent
 
 The Microsoft Store version receives app updates through Microsoft. The version downloaded directly from GitHub checks GitHub Releases for updates; GitHub can see your network address. Microsoft and GitHub handle information under their own privacy policies.
 
-ChalzTracker calculates its usage analytics locally. The app does not send your account credentials or usage history to a ChalzTracker-operated server.
+ChalzTracker calculates its usage analytics locally. Mobile Companion sync is optional. Live browser sharing starts automatically when a relay is configured unless you disable it; otherwise the app does not send usage data to a relay.
+
+## Mobile and browser sharing
+
+Mobile Companion is optional and disabled by default. Live browser sharing starts automatically when a relay is configured unless you disable it. Both provide a read-only view of usage; account sign-in credentials are not included in the shared data.
+
+Shared usage is encrypted before it leaves your PC. The relay stores encrypted mobile snapshots and temporarily holds the latest encrypted live snapshot for connecting viewers. Cloudflare and the relay operator can observe connection information, including IP addresses, connection times, and data sizes. The relay retains hashed IP addresses and request counts for abuse prevention; these records may remain during inactivity.
+
+Anyone with your private browser link or mobile pairing information can view the shared usage. Keep them private. You can disable live sharing or rotate its link in the desktop app. Closing the desktop ends the live session.
+
+For Mobile Companion, **Disconnect & Revoke** stops syncing and attempts to delete the remote data. The app reports if deletion cannot be confirmed. The default relay also removes inactive mobile rooms after 30 days.
 
 ## Retention and deletion
 

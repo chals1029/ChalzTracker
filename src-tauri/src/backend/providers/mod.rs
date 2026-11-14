@@ -291,12 +291,12 @@ pub fn parse_banked_reset_payload(raw: &Value, provider: &str) -> Option<Value> 
         };
         if id.is_empty() && expiry.is_null() && state != "available" && state != "active" { return None; }
         let source = ["source", "grant_reason", "type"].into_iter().map(|key| &entry[key]).find(|value| js_truthy(value)).map(js_string).unwrap_or_else(|| "banked_reset".into());
-        items.push(json!({"id": id, "expiresAt": expiry, "source": source}));
+        let granted = ["granted_at", "grantedAt"].into_iter().map(|k| &entry[k]).find(|v| !v.is_null()).map(iso).unwrap_or(Value::Null);
+        items.push(json!({"id": id, "expiresAt": expiry, "grantedAt": granted, "source": source}));
     }
     items.sort_by(|a, b| match (a["expiresAt"].as_str(), b["expiresAt"].as_str()) { (Some(a), Some(b)) => a.cmp(b), (Some(_), None) => std::cmp::Ordering::Less, (None, Some(_)) => std::cmp::Ordering::Greater, _ => std::cmp::Ordering::Equal });
-    let total = if list.is_some() { items.len() as u64 } else { count.unwrap_or(0) };
+    let total = count.unwrap_or(items.len() as u64);
     let earliest = items.iter().find(|v| !v["expiresAt"].is_null()).map(|v| v["expiresAt"].clone()).unwrap_or(Value::Null);
-    items.truncate(10);
     Some(json!({"count": total, "earliestExpiresAt": earliest, "redeemable": provider == "codex" && total > 0, "items": items}))
 }
 
@@ -340,6 +340,51 @@ mod banked_reset_tests {
         assert_eq!(parsed["count"], 1);
         assert_eq!(parsed["items"][0]["id"], "active");
         assert!(parsed["earliestExpiresAt"].is_string());
+    }
+    #[tokio::test]
+    async fn count_only_inline_fetches_credit_dates_and_reuses_cache() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}/credits", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0; 4096];
+            stream.read(&mut request).await.unwrap();
+            let body = json!({"available_count": 2, "credits": [
+                {"id":"one", "status":"available", "granted_at":"2026-11-01T00:00:00Z", "expires_at":"2999-01-01T00:00:00Z"},
+                {"id":"two", "status":"available", "granted_at":"2026-11-02T00:00:00Z", "expires_at":"2999-02-01T00:00:00Z"}
+            ]}).to_string();
+            stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).as_bytes()).await.unwrap();
+        });
+        let client = Client::builder().no_proxy().build().unwrap();
+        let account = json!({"id":"banked-fetch-test"});
+        invalidate_codex_banked_cache(&account);
+        let inline = parse_inline_banked_resets(&json!({"rate_limit_reset_credits":{"available_count":2}}), "codex").unwrap();
+        let result = tokio::time::timeout(std::time::Duration::from_secs(5), codex_banked_resets_from(&client, &account, Default::default(), Some(inline.clone()), false, &endpoint)).await.unwrap().unwrap();
+        server.await.unwrap();
+        assert_eq!(result["count"], 2);
+        assert_eq!(result["items"].as_array().unwrap().len(), 2);
+        assert!(result["items"][0]["grantedAt"].as_str().unwrap().starts_with("2026-11-01"));
+        assert!(result["items"][1]["expiresAt"].as_str().unwrap().starts_with("2999-02-01"));
+        let cached = codex_banked_resets_from(&client, &account, Default::default(), Some(inline), false, &endpoint).await.unwrap();
+        assert_eq!(cached, result);
+        invalidate_codex_banked_cache(&account);
+    }
+
+    #[test]
+    fn cached_details_expire_and_do_not_override_changed_count() {
+        let details = parse_banked_reset_payload(&json!({"credits":[{"id":"x","expires_at":"2999-01-01T00:00:00Z"}]}), "codex").unwrap();
+        assert!(banked_cache_usable(&details, Some(&json!({"count":1})), now_ms()));
+        assert!(!banked_cache_usable(&details, Some(&json!({"count":2})), now_ms()));
+        assert!(!banked_cache_usable(&details, None, DateTime::parse_from_rfc3339("2999-01-01T00:00:00Z").unwrap().timestamp_millis()));
+    }
+
+    #[test]
+    fn all_reported_credits_are_preserved() {
+        let credits: Vec<Value> = (0..12).map(|i| json!({"id":i.to_string(),"status":"available","expires_at":"2999-01-01T00:00:00Z"})).collect();
+        let result = parse_banked_reset_payload(&json!({"credits":credits}), "codex").unwrap();
+        assert_eq!(result["count"], 12);
+        assert_eq!(result["items"].as_array().unwrap().len(), 12);
     }
 }
 
@@ -515,26 +560,56 @@ pub fn invalidate_codex_banked_cache(account: &Value) {
     if let Ok(mut cache) = CODEX_BANKED_CACHE.lock() { cache.remove(codex_cache_key(account)); }
 }
 
+fn banked_details_complete(value: &Value) -> bool {
+    let Some(count) = value["count"].as_u64() else { return false };
+    let Some(items) = value["items"].as_array() else { return false };
+    count > 0 && items.len() as u64 == count && items.iter().all(|item| !item["expiresAt"].is_null())
+}
+
+fn banked_cache_usable(value: &Value, inline: Option<&Value>, at: i64) -> bool {
+    if let Some(summary) = inline {
+        if summary["count"] != value["count"] { return false; }
+    }
+    match value["earliestExpiresAt"].as_str() {
+        Some(s) => DateTime::parse_from_rfc3339(s).ok().is_some_and(|date| date.timestamp_millis() > at),
+        None => true,
+    }
+}
+
 async fn codex_banked_resets(client: &Client, account: &Value, headers: reqwest::header::HeaderMap, inline: Option<Value>, force: bool) -> Option<Value> {
+    codex_banked_resets_from(client, account, headers, inline, force, "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits").await
+}
+
+async fn codex_banked_resets_from(client: &Client, account: &Value, headers: reqwest::header::HeaderMap, inline: Option<Value>, force: bool, endpoint: &str) -> Option<Value> {
     let key = codex_cache_key(account).to_owned();
     let cached = CODEX_BANKED_CACHE.lock().ok().and_then(|cache| cache.get(&key).cloned());
-    if let Some(value) = inline {
-        if let Ok(mut cache) = CODEX_BANKED_CACHE.lock() { cache.insert(key.clone(), (now_ms(), value.clone())); }
-        return Some(value);
+    if let Some(value) = &inline {
+        if value["count"].as_u64() == Some(0) || banked_details_complete(value) {
+            if let Ok(mut cache) = CODEX_BANKED_CACHE.lock() { cache.insert(key.clone(), (now_ms(), value.clone())); }
+            return Some(value.clone());
+        }
     }
     if !force {
         if let Some((time, value)) = &cached {
-            if now_ms() - time < 600_000 { return Some(value.clone()); }
+            if now_ms() - time < 600_000 && banked_cache_usable(value, inline.as_ref(), now_ms()) {
+                return Some(value.clone());
+            }
         }
     }
-    let fresh = match response_json(client.get("https://chatgpt.com/backend-api/wham/rate-limit-reset-credits").headers(headers)).await {
+    let fresh = match response_json(client.get(endpoint).headers(headers)).await {
         Ok((status, data)) if status.is_success() => parse_banked_reset_payload(&data, "codex"),
         _ => None,
     };
     if let Some(value) = fresh {
+        if inline.as_ref().is_none_or(|summary| summary["count"] == value["count"]) {
+            if let Ok(mut cache) = CODEX_BANKED_CACHE.lock() { cache.insert(key, (now_ms(), value.clone())); }
+            return Some(value);
+        }
+    }
+    if let Some(value) = &inline {
         if let Ok(mut cache) = CODEX_BANKED_CACHE.lock() { cache.insert(key, (now_ms(), value.clone())); }
-        Some(value)
-    } else { None }
+    }
+    inline
 }
 
 /// Fetches Codex usage and cached banked-reset credits. Refresh separately first.

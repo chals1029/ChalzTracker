@@ -187,6 +187,22 @@
           <span id="poll-countdown">60s</span>
         </button>
 
+        <button id="open-mobile-sync-btn" class="pill-button mobile-sync-trigger" type="button" aria-pressed="false" data-sync-state="disabled" title="Mobile Companion — End-to-End Encrypted Read-Only Sync">
+          <svg class="icon-xs" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <rect x="4.2" y="1.8" width="7.6" height="12.4" rx="1.6"/>
+            <path d="M7.2 11.8h1.6" stroke-linecap="round"/>
+          </svg>
+          <span id="mobile-sync-btn-label">Mobile Off</span>
+        </button>
+
+        <button id="open-live-share-btn" class="pill-button live-share-trigger" type="button" aria-pressed="false" data-live-state="disabled" title="Live Browser Share — End-to-End Encrypted Read-Only Live Stream">
+          <svg class="icon-xs" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <circle cx="8" cy="8" r="2.1"/>
+            <path d="M4.6 11.4a4.8 4.8 0 0 1 0-6.8M11.4 4.6a4.8 4.8 0 0 1 0 6.8" stroke-linecap="round"/>
+            <path d="M2.5 13.5a7.8 7.8 0 0 1 0-11M13.5 2.5a7.8 7.8 0 0 1 0 11" stroke-linecap="round"/>
+          </svg>
+          <span id="live-share-btn-label">Live Off</span>
+        </button>
 
         <button id="open-command" class="pill-button command-trigger" type="button" title="Open command palette (Ctrl+K)" aria-label="Open command palette (Ctrl+K)">
           <svg class="icon-xs" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
@@ -475,6 +491,12 @@
           <p>Rename nicknames, assign group tags, pin favorites, pause polling, or re-authenticate any account.</p>
         </div>
         <div class="usage-controls">
+          <button id="vault-mobile-sync-btn" class="chip-toggle" type="button" aria-pressed="false" title="Configure encrypted Mobile Companion sync">
+            Mobile Companion
+          </button>
+          <button id="vault-live-share-btn" class="chip-toggle" type="button" aria-pressed="false" title="Share read-only live usage view in a browser">
+            Live Share
+          </button>
           <button id="toggle-identity-mask" class="chip-toggle" data-identity-mask type="button" aria-pressed="true">
             Reveal emails
           </button>
@@ -894,6 +916,157 @@
         <div class="customize-footer-right">
           <button id="cust-test-notif-btn" class="button secondary btn-sm" type="button">Test AI Logo Alert</button>
           <button id="done-customize-dialog" class="button primary btn-sm" type="button">Done</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- MOBILE COMPANION ENCRYPTED SYNC DIALOG -->
+  <dialog id="mobile-sync-dialog" class="mobile-sync-dialog" aria-labelledby="mobile-sync-dialog-title">
+    <div class="dialog-header">
+      <div>
+        <span class="dialog-kicker">End-to-End Encrypted Read-Only Sync</span>
+        <h2 id="mobile-sync-dialog-title">Mobile Companion</h2>
+        <p>Publish encrypted read-only usage snapshots to your Cloudflare Worker relay. Provider tokens and API keys stay on this PC.</p>
+      </div>
+      <button id="close-mobile-sync-dialog" class="icon-button" type="button" aria-label="Close">×</button>
+    </div>
+
+    <div class="mobile-sync-body">
+      <div id="mobile-sync-status-banner" class="alerts-watcher-banner mobile-sync-banner" data-state="disabled">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="mobile-sync-status-text">Mobile companion sync is disabled.</span>
+      </div>
+
+      <p id="mobile-sync-message" class="auth-message" role="status" aria-live="polite" hidden></p>
+
+      <div class="mobile-sync-form">
+        <label class="mobile-sync-field" for="mobile-sync-relay-url">
+          <span class="cust-label">Cloudflare Worker Relay URL</span>
+          <input id="mobile-sync-relay-url" class="auth-text-input" type="url" placeholder="https://chalztracker-relay.your-subdomain.workers.dev" autocomplete="off" spellcheck="false">
+        </label>
+
+        <div class="mobile-sync-row-split">
+          <label class="mobile-sync-field" for="mobile-sync-interval">
+            <span class="cust-label">Snapshot Interval</span>
+            <select id="mobile-sync-interval" class="control-select">
+              <option value="30">Every 30 seconds</option>
+              <option value="60" selected>Every 60 seconds (Default)</option>
+              <option value="120">Every 2 minutes</option>
+              <option value="300">Every 5 minutes</option>
+            </select>
+          </label>
+        </div>
+
+        <label class="mobile-sync-checkbox">
+          <input id="mobile-sync-allow-http" type="checkbox">
+          <span>Allow HTTP for explicit local development only (<code>localhost</code> / <code>127.0.0.1</code>)</span>
+        </label>
+      </div>
+
+      <div id="mobile-sync-pairing-section" class="mobile-sync-pairing-box" hidden>
+        <div class="mobile-sync-pairing-head">
+          <div>
+            <strong>Pairing Payload (JSON)</strong>
+            <p>Copy or select this payload and paste it into the ChalzTracker Mobile app. Contains your relay URL, room ID, read-only token, and AES-256-GCM key — never your write token or AI credentials.</p>
+          </div>
+          <button id="mobile-sync-copy-btn" class="button secondary btn-sm" type="button">Copy JSON</button>
+        </div>
+        <textarea id="mobile-sync-pairing-json" class="mobile-sync-textarea" readonly rows="4" spellcheck="false" aria-label="Mobile pairing JSON payload"></textarea>
+      </div>
+
+      <div class="omp-help-callout">
+        <strong>Zero-Knowledge Relay Design</strong>
+        <p>Snapshots are encrypted locally with AES-256-GCM before upload. The relay stores only SHA-256 hashes of bearer tokens and the encrypted blob. Disconnecting stops publishing, deletes the remote room, and clears local pairing keys.</p>
+      </div>
+
+      <div class="mobile-sync-actions">
+        <div class="mobile-sync-actions-left">
+          <button id="mobile-sync-sync-now-btn" class="button secondary btn-sm" type="button" hidden>Sync Now</button>
+          <button id="mobile-sync-rotate-btn" class="button secondary btn-sm" type="button" hidden>Rotate Keys</button>
+          <button id="mobile-sync-disconnect-btn" class="button secondary btn-sm danger-btn" type="button" hidden>Disconnect &amp; Revoke</button>
+        </div>
+        <div class="mobile-sync-actions-right">
+          <button id="mobile-sync-enable-btn" class="button primary btn-sm" type="button">Enable &amp; Pair Mobile</button>
+          <button id="done-mobile-sync-dialog" class="button secondary btn-sm" type="button">Close</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- LIVE BROWSER SHARE DIALOG -->
+  <dialog id="live-share-dialog" class="mobile-sync-dialog live-share-dialog" aria-labelledby="live-share-dialog-title">
+    <div class="dialog-header">
+      <div>
+        <span class="dialog-kicker">Live Browser Companion</span>
+        <h2 id="live-share-dialog-title">Live Browser Share</h2>
+        <p>Sharing starts automatically when a relay is configured. Disabling it keeps it off until you start it again; closing the app ends the current session.</p>
+      </div>
+      <button id="close-live-share-dialog" class="icon-button" type="button" aria-label="Close">×</button>
+    </div>
+
+    <div class="mobile-sync-body">
+      <div id="live-share-status-banner" class="alerts-watcher-banner mobile-sync-banner live-share-banner" data-state="disabled">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="live-share-status-text">Live browser sharing is off.</span>
+      </div>
+
+      <p id="live-share-message" class="auth-message" role="status" aria-live="polite" hidden></p>
+
+      <div id="live-share-config-callout" class="omp-help-callout live-share-config-callout">
+        <strong id="live-share-config-title">Shared Relay Configuration</strong>
+        <p id="live-share-config-text">Relay URL required until the operator deploys the shared relay and builds with <code>CHALZ_LIVE_RELAY_URL</code>.</p>
+      </div>
+
+      <details id="live-share-dev-details" class="live-share-dev-details">
+        <summary>Developer options (custom HTTPS relay override)</summary>
+        <div class="live-share-dev-body">
+          <label class="mobile-sync-field" for="live-share-relay-url">
+            <span class="cust-label">Custom Relay URL Override (HTTPS)</span>
+            <input id="live-share-relay-url" class="auth-text-input" type="password" placeholder="Enter a custom HTTPS relay URL" autocomplete="off" spellcheck="false">
+          </label>
+          <label class="mobile-sync-checkbox">
+            <input id="live-share-allow-http" type="checkbox">
+            <span>Allow <code>http://</code> / <code>ws://</code> for explicit local loopback development only (<code>localhost</code> / <code>127.0.0.1</code>; production browser companion rejects insecure relays)</span>
+          </label>
+          <p class="live-share-dev-note">Optional override for development/self-hosting. Must use <code>https://</code>; the desktop host connects via <code>wss://</code> and embeds the HTTPS base in the link.</p>
+        </div>
+      </details>
+
+      <div id="live-share-link-section" class="mobile-sync-pairing-box" hidden>
+        <div class="mobile-sync-pairing-head">
+          <div>
+            <strong>Private Companion Link</strong>
+            <p>Treat this link as a secret. The decryption key stays in the URL fragment and is not sent to the relay. A new link is created each time ChalzTracker starts.</p>
+          </div>
+          <button id="live-share-copy-btn" class="button secondary btn-sm" type="button">Copy Link</button>
+        </div>
+        <input id="live-share-link-input" class="mobile-sync-textarea" type="password" readonly autocomplete="off" spellcheck="false" aria-label="Private live companion URL">
+        <div class="live-share-qr-row">
+          <div class="live-share-qr-frame">
+            <canvas id="live-share-qr-canvas" width="180" height="180" aria-label="Local QR code for private live companion link"></canvas>
+          </div>
+          <div class="live-share-qr-meta">
+            <strong>Scan to open on phone or tablet</strong>
+            <p>QR code is generated locally inside ChalzTracker with zero third-party requests. Snapshots push automatically when a viewer joins, on usage changes, and every 60 seconds.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="omp-help-callout">
+        <strong>Active Only While Desktop Runs</strong>
+        <p>Only sanitized quota fields leave this PC, encrypted locally with AES-256-GCM before upload. Rotating creates a new room &amp; key; disabling or closing ChalzTracker drops the relay room and marks viewers offline.</p>
+      </div>
+
+      <div class="mobile-sync-actions">
+        <div class="mobile-sync-actions-left">
+          <button id="live-share-sync-now-btn" class="button secondary btn-sm" type="button" hidden>Push Now</button>
+          <button id="live-share-rotate-btn" class="button secondary btn-sm" type="button" hidden>Rotate Link</button>
+          <button id="live-share-disable-btn" class="button secondary btn-sm danger-btn" type="button" hidden>Disable</button>
+        </div>
+        <div class="mobile-sync-actions-right">
+          <button id="live-share-enable-btn" class="button primary btn-sm" type="button">Start Live Share</button>
+          <button id="done-live-share-dialog" class="button secondary btn-sm" type="button">Close</button>
         </div>
       </div>
     </div>
