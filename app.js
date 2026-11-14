@@ -284,7 +284,6 @@ const state = {
   routerPriority: 'balanced',
   timelineRange: 'all',
   showRemaining: false,
-  popoverLayout: false,
   maskIdentities: true,
   identityVisibility: new Map(),
   viewMode: 'dashboard', // 'dashboard' | 'widget' | 'pill'
@@ -1431,8 +1430,9 @@ function buildBankedResetStrip(account) {
   header.append(copy);
 
   if (b.redeemable) {
-    const btn = node('button', 'redeem-reset-btn', state.busy.has(account.id) ? 'Redeeming…' : 'Redeem Reset');
+    const btn = node('button', 'redeem-reset-btn', state.busy.has(account.id) ? 'Redeeming…' : 'Redeem next reset');
     btn.type = 'button';
+    btn.dataset.detailAction = 'redeem';
     btn.disabled = state.loading || state.busy.has(account.id);
     btn.addEventListener('click', () => redeemBankedReset(account));
     header.append(btn);
@@ -2126,59 +2126,6 @@ function renderWidgetAndPill() {
     detailEl.replaceChildren(buildWidgetDetailPane(selectedAccount));
   }
 
-  // Inline Dashboard Popover Preview
-  const inlinePreview = $('inline-widget-preview');
-  if (inlinePreview) {
-    inlinePreview.hidden = !state.popoverLayout;
-    inlinePreview.replaceChildren();
-    if (state.popoverLayout) {
-      const shell = node('div', 'widget-shell');
-      const chrome = node('div', 'widget-chrome');
-      const chromeLeft = node('div', 'widget-chrome-left');
-      const inlineBrand = node('span', 'widget-chrome-title brand-inline');
-      const inlineLogo = node('span', 'chalz-text-logo sm', 'Chalz');
-      inlineLogo.append(node('span', 'chalz-slash', '/'));
-      inlineBrand.append(inlineLogo, node('span', 'chalz-tracker-tag', 'Tracker'));
-      chromeLeft.append(
-        node('span', 'status-dot'),
-        inlineBrand,
-        node('span', 'widget-chrome-sep', '·'),
-        node('span', 'widget-chrome-sub', state.widgetGroupByProvider ? 'Grouped by provider' : `All ${accounts.length} accounts`)
-      );
-      const chromeActions = node('div', 'widget-chrome-actions');
-      const inlineGroupBtn = node('button', 'chrome-pill-btn', state.widgetGroupByProvider ? 'By provider' : 'All accounts');
-      inlineGroupBtn.type = 'button';
-      inlineGroupBtn.setAttribute('aria-pressed', String(state.widgetGroupByProvider));
-      inlineGroupBtn.addEventListener('click', () => setWidgetGroupByProvider(!state.widgetGroupByProvider));
-      chromeActions.append(inlineGroupBtn);
-      chrome.append(chromeLeft, chromeActions);
-
-      const cols = node('div', 'widget-columns');
-      const master = node('div', 'widget-master');
-      const detail = node('div', 'widget-detail');
-      const visible = filteredAccounts();
-      const entries = widgetMasterEntries(visible, state.widgetGroupByProvider);
-      const activeInPreview = visible.find(a => a.id === state.selectedAccountId) || entries[0]?.account || visible[0] || null;
-      if (!entries.length) {
-        master.append(node('p', 'no-limits', 'No matching accounts.'));
-      } else {
-        for (const entry of entries) {
-          const acc = entry.account;
-          const isSelected = state.widgetGroupByProvider
-            ? providerKey(acc) === providerKey(activeInPreview)
-            : acc.id === activeInPreview?.id;
-          master.append(buildWidgetAccountRow(acc, isSelected, id => {
-            selectWidgetAccount(id, !entry.groupedProvider);
-            renderWidgetAndPill();
-          }, entry));
-        }
-      }
-      detail.append(buildWidgetDetailPane(activeInPreview));
-      cols.append(master, detail);
-      shell.append(chrome, cols);
-      inlinePreview.append(shell);
-    }
-  }
 
   // Mini Clickable Desktop Pill Button
   const pillIcons = $('mini-pill-icons');
@@ -2256,15 +2203,28 @@ function renderSmartRouter() {
     card.append(body);
 
     card.addEventListener('click', () => {
-      selectWidgetAccount(rec.accountId);
-      const cardEl = document.getElementById(`acc-card-${rec.accountId}`);
-      if (cardEl) {
-        cardEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const acc = state.accounts.find(a => a.id === rec.accountId);
+      if (!acc) return;
+      if (!filteredAccounts().some(a => a.id === rec.accountId)) {
+        if (state.providerFilter !== 'all' && state.providerFilter !== providerKey(acc)) {
+          state.providerFilter = 'all';
+        }
+        if (state.tagFilter !== 'all' && (acc.tag || '') !== state.tagFilter) {
+          state.tagFilter = 'all';
+          const tagEl = $('tag-filter');
+          if (tagEl) tagEl.value = 'all';
+        }
+        if (state.accountSearch.trim() && !filteredAccounts().some(a => a.id === rec.accountId)) {
+          state.accountSearch = '';
+          const searchEl = $('account-search');
+          if (searchEl) searchEl.value = '';
+        }
       }
+      selectWidgetAccount(rec.accountId);
+      render();
+      document.getElementById(`acc-card-${rec.accountId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       showToast(`Best ${info.name} account now: ${recLabel}`, 'info', rec.provider);
-      renderWidgetAndPill();
     });
-
     bar.append(card);
   }
   if (recs.length) for (const key of unavailableProviders) {
@@ -2346,15 +2306,36 @@ function renderLimit(limit) {
   const metaRow = node('div', 'limit-meta-row');
   const reset = formatDate(limit.resetsAt);
   const rel = formatRelativeTime(limit.resetsAt);
-  metaRow.append(
-    node('span', 'reset', reset ? `Resets ${reset}` : 'Reset time unavailable'),
-    node('span', 'reset', rel && rel.startsWith('in ') ? `Resets ${rel}` : '')
-  );
+  const resetText = rel && rel.startsWith('in ') ? `Resets ${rel}` : (reset ? `Resets ${reset}` : 'Reset time unavailable');
+  const resetNode = node('span', 'reset', resetText);
+  if (reset) resetNode.title = `Resets ${reset}`;
+  metaRow.append(resetNode);
   item.append(metaRow);
   return item;
 }
 
-function renderAccount(account) {
+function updateBankedResetDialog() {
+  const dialog = $('banked-reset-dialog');
+  if (!dialog?.open) return;
+  const account = state.accounts.find(item => item.id === dialog.dataset.accountId);
+  const strip = buildBankedResetStrip(account);
+  if (!strip) {
+    dialog.close();
+    return;
+  }
+  $('banked-reset-dialog-account').textContent = accountLabel(account);
+  $('banked-reset-dialog-content').replaceChildren(strip);
+}
+
+function openBankedResetDialog(account) {
+  const dialog = $('banked-reset-dialog');
+  if (!dialog || dialog.open) return;
+  dialog.dataset.accountId = account.id;
+  dialog.showModal();
+  updateBankedResetDialog();
+}
+
+function renderAccount(account, options = {}) {
   const info = providerInfo(account);
   const label = accountLabel(account);
   const classes = ['account-card'];
@@ -2373,10 +2354,6 @@ function renderAccount(account) {
   const titleRow = node('div', 'title-badges-row');
   titleRow.append(node('h3', '', label));
   if (recommended) titleRow.append(node('span', 'best-badge', '★ Best Now'));
-  if (account.bankedResets?.count > 0) {
-    const bc = account.bankedResets.count;
-    titleRow.append(node('span', `banked-badge${account.bankedResets.expiringSoon ? ' expiring' : ''}`, `${bc} Banked`));
-  }
   if (account.pinned) titleRow.append(node('span', 'pin-badge', 'Pinned'));
   if (account.tag) titleRow.append(node('span', 'tag-badge', account.tag));
 
@@ -2408,8 +2385,9 @@ function renderAccount(account) {
   const limits = node('div', 'limits');
   limits.setAttribute('role', 'region');
   limits.setAttribute('aria-label', `Usage for ${label}`);
+  limits.tabIndex = 0;
 
-  const query = state.accountSearch.trim().toLowerCase();
+  const query = options.showAllLimits ? '' : state.accountSearch.trim().toLowerCase();
   const allLimits = orderedLimits(account);
   const matchingLimits = query
     ? allLimits.filter(l => String(l.label || '').toLowerCase().includes(query)
@@ -2427,8 +2405,15 @@ function renderAccount(account) {
   }
   card.append(limits);
 
-  const bankedStrip = buildBankedResetStrip(account);
-  if (bankedStrip) card.append(bankedStrip);
+  if (typeof account.bankedResets?.count === 'number' && Number.isFinite(account.bankedResets.count) && account.bankedResets.count > 0) {
+    const count = account.bankedResets.count;
+    const resetButton = node('button', 'account-credit-button');
+    resetButton.type = 'button';
+    resetButton.append(node('span', '', `Available resets: ${count}${account.bankedResets.expiringSoon ? ' · expiring soon' : ''}`));
+    resetButton.append(node('span', 'reset-disclosure-label', 'Show resets'));
+    resetButton.addEventListener('click', () => openBankedResetDialog(account));
+    card.append(resetButton);
+  }
 
   if (account.error) {
     card.append(node('p', 'account-error', safeAccountText(account.error, account)));
@@ -2444,6 +2429,7 @@ function renderAccount(account) {
 
   const pinBtn = node('button', 'text-button', account.pinned ? 'Unpin' : 'Pin');
   pinBtn.type = 'button';
+  pinBtn.dataset.detailAction = 'pin';
   pinBtn.addEventListener('click', () => patchAccountMeta(account.id, { pinned: !account.pinned }));
   actions.append(pinBtn);
   const handoffUrls = {
@@ -2473,20 +2459,22 @@ function renderAccount(account) {
   if (account.error || account.status === 'Unavailable' || account.status === 'Stale') {
     const reauthBtn = node('button', 'text-button', 'Re-auth');
     reauthBtn.type = 'button';
+    reauthBtn.dataset.detailAction = 'reauth';
     reauthBtn.addEventListener('click', () => openAddAccountDialog({ reauthAccount: account }));
     actions.append(reauthBtn);
   }
 
   const refreshBtn = node('button', 'text-button', state.busy.has(account.id) ? 'Syncing…' : 'Refresh');
   refreshBtn.type = 'button';
+  refreshBtn.dataset.detailAction = 'refresh';
   refreshBtn.disabled = state.loading || state.busy.size > 0;
   refreshBtn.addEventListener('click', () => refreshAccounts(account.id));
 
   const removeBtn = node('button', 'text-button remove', 'Remove');
   removeBtn.type = 'button';
+  removeBtn.dataset.detailAction = 'remove';
   removeBtn.disabled = state.loading || state.busy.size > 0;
   removeBtn.addEventListener('click', () => removeAccount(account));
-
   actions.append(refreshBtn, removeBtn);
   bottom.append(actions);
   card.append(bottom);
@@ -3478,12 +3466,25 @@ refreshConnectivity();
 
 let routerEligibilitySignature = '';
 
+
+function clearAccountFilters() {
+  state.providerFilter = 'all';
+  state.tagFilter = 'all';
+  state.accountSearch = '';
+  const tagEl = $('tag-filter');
+  if (tagEl) tagEl.value = 'all';
+  const searchEl = $('account-search');
+  if (searchEl) searchEl.value = '';
+}
+
+
 function render() {
   routerEligibilitySignature = JSON.stringify(state.accounts.filter(account => routerEligible(account)).map(account => account.id));
   renderDynamicProviderChips();
   renderSmartRouter();
 
   const container = $('accounts');
+
   if (container) {
     container.replaceChildren();
     const visible = filteredAccounts();
@@ -3500,7 +3501,11 @@ function render() {
     const refreshBtn = $('refresh-all');
     if (refreshBtn) refreshBtn.disabled = state.loading || state.busy.size > 0;
 
-    if (state.loaded && !state.accounts.length && !state.loading) {
+    if (!state.loaded && !state.accounts.length) {
+      container.setAttribute('role', 'region');
+      container.append(node('p', 'no-limits', state.loading ? 'Loading connected accounts…' : 'Accounts unavailable.'));
+    } else if (state.loaded && !state.accounts.length && !state.loading) {
+      container.setAttribute('role', 'region');
       const empty = node('div', 'empty');
       const emptyActions = node('div', 'empty-actions');
       const addBtn = node('button', 'button primary btn-sm', '+ Add Your First Account');
@@ -3517,18 +3522,31 @@ function render() {
       );
       container.append(empty);
     } else if (state.loaded && state.accounts.length && !visible.length) {
+      container.setAttribute('role', 'region');
       const empty = node('div', 'empty');
+      const emptyActions = node('div', 'empty-actions');
+      const clearBtn = node('button', 'button secondary btn-sm', 'Clear filters');
+      clearBtn.type = 'button';
+      clearBtn.addEventListener('click', () => {
+        clearAccountFilters();
+        render();
+        $('account-search')?.focus({ preventScroll: true });
+      });
+      emptyActions.append(clearBtn);
       empty.append(
         node('h3', '', 'No matching accounts'),
-        node('p', '', 'Try clearing the provider/tag filter or search query.')
+        node('p', '', 'Try clearing the provider/tag filter or search query.'),
+        emptyActions
       );
       container.append(empty);
     } else {
       for (const account of visible) container.append(renderAccount(account));
     }
+
   }
 
   renderWidgetAndPill();
+  updateBankedResetDialog();
   if (activeTab === 'analytics') renderAnalytics();
   else if (activeTab === 'timeline') renderTimeline();
   else if (activeTab === 'vault') renderVault();
@@ -3611,11 +3629,23 @@ async function removeAccount(account) {
     confirmLabel: 'Remove account',
     destructive: true
   })) return;
+  const visibleBefore = filteredAccounts();
+  const removedIdx = visibleBefore.findIndex(a => a.id === account.id);
+  const wasSelected = state.selectedAccountId === account.id;
   state.busy.add(account.id);
   render();
   try {
     const res = await request(`/api/accounts/${encodeURIComponent(account.id)}`, { method: 'DELETE' });
     acceptAccounts(res);
+    for (const [pk, id] of state.providerAccountSelection.entries()) {
+      if (id === account.id) state.providerAccountSelection.delete(pk);
+    }
+    if (wasSelected) {
+      const visibleAfter = filteredAccounts();
+      state.selectedAccountId = (removedIdx !== -1 && visibleAfter.length)
+        ? visibleAfter[Math.min(removedIdx, visibleAfter.length - 1)].id
+        : (visibleAfter[0]?.id || null);
+    }
     loadAnalytics();
     showToast(`Removed ${accountLabel(account)}`);
   } catch (error) {
@@ -3623,6 +3653,9 @@ async function removeAccount(account) {
   } finally {
     state.busy.delete(account.id);
     render();
+    if (activeTab === 'usage' && !document.querySelector('dialog[open]') && (!document.activeElement || document.activeElement === document.body)) {
+      (document.querySelector('#accounts .account-card button') || document.querySelector('#accounts .empty button') || $('add-account'))?.focus({ preventScroll: true });
+    }
   }
 }
 
@@ -4324,6 +4357,14 @@ $('account-search')?.addEventListener('input', e => {
   state.accountSearch = e.target.value;
   render();
 });
+$('account-search')?.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && e.target.value) {
+    e.preventDefault();
+    e.target.value = '';
+    state.accountSearch = '';
+    render();
+  }
+});
 $('tag-filter')?.addEventListener('change', e => {
   state.tagFilter = e.target.value;
   render();
@@ -4339,12 +4380,6 @@ $('quota-mode-toggle')?.addEventListener('click', () => {
   btn.textContent = state.showRemaining ? 'Show: Remaining %' : 'Show: Used %';
   render();
 });
-$('layout-toggle')?.addEventListener('click', () => {
-  state.popoverLayout = !state.popoverLayout;
-  $('layout-toggle')?.setAttribute('aria-pressed', String(state.popoverLayout));
-  render();
-});
-
 // Exports & Vault controls
 $('export-fleet-csv')?.addEventListener('click', exportFleetCsv);
 $('export-events-csv')?.addEventListener('click', exportEventsCsv);

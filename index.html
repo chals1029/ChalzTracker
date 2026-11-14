@@ -209,6 +209,7 @@
             <circle cx="7" cy="7" r="4.3"/>
             <path d="M10.3 10.3L13.8 13.8" stroke-linecap="round"/>
           </svg>
+          <span>Command palette</span>
           <kbd class="kbd-hint">Ctrl K</kbd>
         </button>
 
@@ -225,7 +226,6 @@
     <!-- Hero Header -->
     <header class="header">
       <div class="header-copy">
-        <p class="kicker">Your Personal AI Usage Tracker</p>
         <div class="chalz-brand-lockup">
           <div class="chalz-mark-box" aria-hidden="true">
             <svg class="chalz-mark-svg" viewBox="0 0 36 36" fill="none">
@@ -255,7 +255,6 @@
             </h1>
           </div>
         </div>
-        <p class="subtitle">Connect unlimited accounts across Antigravity, Codex, Claude, Cursor, Copilot &amp; more — 100% standalone.</p>
       </div>
       <div class="header-actions">
         <button class="button secondary" id="open-customize-btn" type="button" title="Customize colors, card layout, sections &amp; notification sounds (Shortcut: C)">
@@ -422,18 +421,13 @@
             <button class="chip-toggle" data-identity-mask type="button" aria-pressed="true" title="Show or hide account emails">
               Reveal emails
             </button>
-            <button id="layout-toggle" class="chip-toggle" type="button" aria-pressed="false" title="Toggle between Master-Detail Popover layout and Card Grid">
-              Popover layout
-            </button>
             </div>
           </div>
         </div>
         <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
 
-        <!-- Inline Master-Detail Popover Preview -->
-        <div id="inline-widget-preview" class="inline-widget-preview" hidden></div>
 
-        <div id="accounts" class="account-grid" aria-live="polite"></div>
+        <div id="accounts" class="account-grid" aria-label="Connected accounts" aria-live="polite"></div>
       </section>
     </div>
 
@@ -1070,6 +1064,19 @@
         </div>
       </div>
     </div>
+  </dialog>
+
+  <dialog id="banked-reset-dialog" aria-labelledby="banked-reset-dialog-title">
+    <div class="dialog-header">
+      <div>
+        <h2 id="banked-reset-dialog-title">Available resets</h2>
+        <p id="banked-reset-dialog-account"></p>
+      </div>
+    </div>
+    <div id="banked-reset-dialog-content"></div>
+    <form method="dialog" class="confirm-actions">
+      <button class="button secondary btn-sm" type="submit">Close</button>
+    </form>
   </dialog>
 
   <dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title" aria-describedby="confirm-description">

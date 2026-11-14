@@ -686,10 +686,6 @@ body[data-view-mode="pill"][data-pill-expanded="true"] .widget-detail {
   flex-direction: column;
 }
 
-.inline-widget-preview .widget-shell {
-  box-shadow: var(--shadow-card);
-  margin-bottom: 18px;
-}
 
 .widget-chrome {
   display: flex;
@@ -1366,7 +1362,7 @@ body.is-desktop-app[data-view-mode="pill"] .mini-pill-drag {
    ========================================================================== */
 
 .shell {
-  width: min(1080px, calc(100% - 36px));
+  width: min(1140px, calc(100% - 36px));
   margin: 0 auto;
   padding: 14px 0 32px;
 }
@@ -1483,22 +1479,29 @@ body.is-desktop-app[data-view-mode="pill"] .mini-pill-drag {
 }
 
 .topbar-controls .pill-button {
-  width: 34px;
+  min-width: 34px;
   height: 34px;
-  padding: 0;
+  padding: 0 10px;
+  gap: 0;
   justify-content: center;
 }
 
 .topbar-controls .pill-button > span {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
+  max-width: 0;
   overflow: hidden;
-  clip-path: inset(50%);
   white-space: nowrap;
-  border: 0;
+  opacity: 0;
+  transition: max-width 0.2s ease, margin-left 0.2s ease, opacity 0.15s ease;
+}
+
+.topbar-controls .pill-button:is(:hover, :focus-visible) > span {
+  max-width: 180px;
+  margin-left: 7px;
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topbar-controls .pill-button > span { transition: none; }
 }
 
 .topbar-controls .kbd-hint {
@@ -1886,10 +1889,10 @@ h1,
   flex-direction: column;
   gap: 8px;
   padding: 14px 16px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--bg-surface);
-  box-shadow: var(--shadow-card);
+  border: 1px solid color-mix(in srgb, var(--text-primary) 13%, transparent);
+  border-radius: 16px;
+  background: radial-gradient(ellipse at 85% -45%, color-mix(in srgb, var(--text-primary) 10%, transparent), transparent 62%), var(--bg-elevated);
+  box-shadow: inset 0 1px color-mix(in srgb, var(--text-primary) 8%, transparent), 0 10px 24px rgba(0, 0, 0, 0.16);
   transition: border-color 0.14s ease, background 0.14s ease;
 }
 
@@ -2207,23 +2210,59 @@ h1,
   color: #fca5a5;
 }
 
+[data-theme="light"] .notice.error,
+[data-theme="light"] .auth-message.error,
+[data-theme="light"] .account-error {
+  color: var(--usage-crit);
+}
+
+
 /* Account Grid & Cards (Clean Native Style matching Reference Image 2 right pane) */
 .account-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
+  align-items: stretch;
 }
 
 .account-card {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-xl);
-  background: var(--bg-surface);
-  box-shadow: var(--shadow-card);
+  border: 1px solid color-mix(in srgb, var(--text-primary) 13%, transparent);
+  border-radius: 16px;
+  background: radial-gradient(ellipse at 85% -25%, color-mix(in srgb, var(--text-primary) 9%, transparent), transparent 54%), var(--bg-elevated);
+  box-shadow: inset 0 1px color-mix(in srgb, var(--text-primary) 8%, transparent), 0 12px 30px rgba(0, 0, 0, 0.18);
   overflow: hidden;
   transition: border-color 0.14s ease;
+}
+
+.account-credit-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 18px 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.account-credit-button:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+.reset-disclosure-label {
+  flex: none;
+  color: var(--text-secondary);
+}
+#banked-reset-dialog-content .banked-bar {
+  margin: 16px 0 0;
 }
 
 .account-card:hover {
@@ -2235,8 +2274,8 @@ h1,
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 15px 18px;
-  border-bottom: 1px solid var(--border-subtle);
+  padding: 17px 18px 12px;
+  border-bottom: 0;
 }
 
 .identity {
@@ -2272,9 +2311,9 @@ h1,
 .status {
   flex: none;
   white-space: nowrap;
-  border: 1px solid var(--border-subtle);
-  border-radius: 999px;
-  padding: 3px 9px;
+  border: 0;
+  border-radius: 6px;
+  padding: 3px 7px;
   color: var(--text-secondary);
   background: var(--bg-subtle);
   font-size: 11px;
@@ -2301,18 +2340,19 @@ h1,
 
 /* Quota Limits inside Account Card */
 .limits {
-  min-height: 90px;
-  max-height: 270px;
+  min-height: 0;
+  max-height: 190px;
   overflow-y: auto;
-  padding: 15px 18px;
+  padding: 8px 18px 18px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 18px;
   scrollbar-width: thin;
 }
 
 .limit {
   display: flex;
+  flex-shrink: 0;
   flex-direction: column;
   gap: 6px;
 }
@@ -2332,11 +2372,11 @@ h1,
 }
 
 .limit-value {
-  color: var(--text-secondary);
+  color: var(--text-primary);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 650;
 }
 
 .limit-value[data-severity="high"] {
@@ -2382,13 +2422,21 @@ h1,
 
 .card-footer {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
   border-top: 1px solid var(--border-subtle);
   margin-top: auto;
-  padding: 11px 18px;
-  background: var(--bg-elevated);
+  padding: 10px 18px;
+  background: transparent;
+}
+
+.card-footer .card-actions {
+  gap: 4px 8px;
+}
+
+.card-footer .text-button {
+  white-space: nowrap;
 }
 
 .updated {
@@ -3333,6 +3381,7 @@ dialog code {
   }
 }
 
+
 /* ==========================================================================
    SMART ACCOUNT ROUTER, PACE FORECASTER, VAULT & 10-PROVIDER AUTH MODAL
    ========================================================================== */
@@ -3340,9 +3389,9 @@ dialog code {
 .smart-router-section {
   margin-bottom: 20px;
   padding: 14px 16px;
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border-strong);
-  background: var(--bg-surface);
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--text-primary) 13%, transparent);
+  background: radial-gradient(ellipse at 85% -45%, color-mix(in srgb, var(--text-primary) 10%, transparent), transparent 60%), var(--bg-elevated);
 }
 
 .smart-router-header {
@@ -3443,7 +3492,7 @@ dialog code {
 
 /* Account Card Best / Tag / Pin / Pace Badges */
 .account-card.recommended-card {
-  border-color: rgba(48, 209, 88, 0.35);
+  border-color: color-mix(in srgb, var(--text-primary) 18%, transparent);
 }
 
 .account-card.paused-card {
@@ -3517,11 +3566,11 @@ dialog code {
 }
 
 .status[data-status="paused"],
-.status[data-status="stale"] {
+.status[data-status="stale"],
+.status[data-stale="true"] {
   border-color: rgba(245, 166, 35, 0.35);
   color: var(--usage-warn);
 }
-
 .limit-heading-left {
   display: flex;
   align-items: center;
@@ -4008,8 +4057,8 @@ dialog code {
   margin: 0 18px 12px;
   padding: 9px 12px;
   border-radius: 9px;
-  border: 1px solid color-mix(in srgb, var(--status-ok) 28%, transparent);
-  background: color-mix(in srgb, var(--status-ok) 7%, transparent);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
   font-size: 12px;
 }
 
@@ -4118,7 +4167,7 @@ html[data-density="compact"] .banked-bar {
   font-weight: 600;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
-  color: var(--status-ok);
+  color: var(--text-secondary);
 }
 
 .banked-credit-countdown[data-state="expiring"] {
@@ -4132,8 +4181,8 @@ html[data-density="compact"] .banked-bar {
   flex: none;
   padding: 4px 10px;
   border-radius: 7px;
-  border: 1px solid rgba(48, 209, 88, 0.4);
-  background: rgba(48, 209, 88, 0.14);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-subtle);
   color: var(--text-primary);
   font-size: 11.5px;
   font-weight: 600;
@@ -4142,8 +4191,8 @@ html[data-density="compact"] .banked-bar {
 }
 
 .redeem-reset-btn:hover:not(:disabled) {
-  background: rgba(48, 209, 88, 0.24);
-  border-color: var(--status-ok);
+  background: var(--bg-hover);
+  border-color: var(--text-secondary);
 }
 
 .redeem-reset-btn:disabled {
@@ -4250,7 +4299,6 @@ html[data-density="compact"] .smart-router-section {
   padding: 11px 13px;
   margin-bottom: 15px;
 }
-
 html[data-density="spacious"] .account-grid {
   gap: 18px;
 }
@@ -4293,7 +4341,6 @@ html[data-bar-style="glow"] progress.meter[data-severity="critical"],
 html[data-bar-style="glow"] progress.detail-meter[data-severity="critical"] {
   box-shadow: 0 0 12px rgba(239, 68, 68, 0.28);
 }
-
 html[data-hide-router="true"] #smart-router-section {
   display: none !important;
 }
